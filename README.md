@@ -8,7 +8,7 @@ Saarthi is an avatar-based, multilingual AI wealth advisor designed to embed ins
 
 | Capability | What it does |
 |---|---|
-| 🧑‍✈️ Avatar advisor | Animated avatar with voice + text in English & Hindi (Web Speech API) |
+| 🎙️ Realtime voice avatar | Live spoken conversation (Google ADK + Gemini Live, barge-in supported) in English & Hindi, with animated avatar and live captions |
 | 📊 360° portfolio | Savings, FDs, MFs, NPS, EPF, categorized spends, goals — one dashboard |
 | 🎯 Suitability engine | Age, risk-profile and segment-aware recommendations, down to specific IDBI MF schemes |
 | 🧮 Scenario simulation | "Can I afford a ₹50L home loan?" → EMI, FOIR, surplus math with a clear verdict |
@@ -19,33 +19,39 @@ Saarthi is an avatar-based, multilingual AI wealth advisor designed to embed ins
 ## Architecture
 
 ```
-React (mobile-app shell, avatar, voice)  →  FastAPI (Saarthi API)
-                                              └── Orchestrator (LLM tool-use loop)
-                                                    ├── Portfolio & Net-Worth agent
-                                                    ├── Scenario Simulation agent (EMI/FOIR)
-                                                    ├── Household (Humsafar) agent
-                                                    ├── Product Catalog / Suitability
-                                                    └── Compliance Gate → RM Lead queue
-                                              └── Synthetic bank data (round-1 scope)
+Browser (React phone shell, avatar, AudioWorklets)
+   │ REST /api/chat (text)          │ WS /ws/voice/{cid} (16kHz PCM up / 24kHz down)
+   ▼                                ▼
+FastAPI ──────────────────► ADK live session (Gemini Live, barge-in, transcripts)
+   │                                │ ask_saarthi(question)   ← thin voice layer
+   ▼                                ▼
+LangChain create_agent  ◄───────────┘   ← one brain for both channels
+   ├── @tools: portfolio · household view · loan simulation (EMI/FOIR)
+   │           goal planner (deterministic math) · product catalog · RM lead
+   ├── ComplianceGateMiddleware (wrap_model_call): regulated intents get a
+   │   hard handoff directive + deterministic lead-creation fallback
+   └── Synthetic bank data (round-1 scope) + RM lead queue
 ```
 
-Prototype LLM: OpenAI API. Production target: the same orchestration on **Amazon Bedrock** inside IDBI's AWS landing zone (provider-agnostic tool-use layer — one-line swap), with RDS for the bank book and core-banking APIs replacing the synthetic layer.
+- **Brain**: LangChain `create_agent` (v1) — model set by `LLM_MODEL` (OpenAI in the prototype; provider-agnostic via `init_chat_model` strings, so the same agent runs on **Amazon Bedrock** models inside IDBI's AWS landing zone in production).
+- **Voice**: Google ADK drives a bidirectional **Gemini Live** session per connection; the voice agent is deliberately thin and delegates every substantive question to the same LangChain brain — so text and voice share tools, compliance and customer scoping.
+- **Compliance as middleware, not prompts**: the gate inspects each turn before the model sees it; if the model still skips the RM handoff, the lead is created deterministically.
 
 > Round-1 note: per the hackathon instructions, all data is **synthetic and self-generated** (4 personas across Mass / Mass Affluent / HNI segments with 12 months of categorized transactions, holdings and joint-account links). No real customer data anywhere.
 
 ## Run locally
 
 ```bash
-# backend
+# backend (uv-managed)
 cd backend
-python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
-export OPENAI_API_KEY=sk-...
-./.venv/bin/uvicorn app.main:app --port 8000
+uv sync
+cp .env.example .env   # add OPENAI_API_KEY + GOOGLE_API_KEY
+uv run uvicorn app.main:app --port 8000
 
 # frontend (second terminal)
 cd frontend
 npm install
-npm run dev        # http://localhost:5173 (proxies /api to :8000)
+npm run dev        # http://localhost:5173 (proxies /api and /ws to :8000)
 ```
 
 ## Deploy

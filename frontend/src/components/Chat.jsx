@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { api } from '../api'
 import { useSpeech } from '../useSpeech'
+import { useVoiceSession } from '../useVoiceSession'
 import Avatar from './Avatar'
 
 const GREET = {
@@ -28,6 +29,29 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
   const bottomRef = useRef(null)
   const speechRef = useRef(speech)
   speechRef.current = speech
+
+  // Realtime voice session (Gemini Live via ADK). Transcripts land in the
+  // same message list; leads flash the RM console tab like text chat does.
+  const voice = useVoiceSession({
+    onTranscript: (who, text) =>
+      setMessages((m) => {
+        const role = who === 'user' ? 'user' : 'assistant'
+        const last = m[m.length - 1]
+        if (last?.role === role && last?.live) {
+          return [...m.slice(0, -1), { ...last, content: last.content + text }]
+        }
+        return [...m, { role, content: text, live: true }]
+      }),
+    onLead: (lead) => {
+      setMessages((m) => [...m, { role: 'assistant', content: '', lead, live: true }])
+      onLead?.(lead)
+    },
+  })
+
+  const toggleLive = () => {
+    if (voice.live) voice.stop()
+    else voice.start(customer.id, householdMode)
+  }
 
   useEffect(() => {
     setMessages([{ role: 'assistant', content: GREET[lang](customer.name) }])
@@ -58,12 +82,11 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
     }
   }
 
-  const mic = () => {
-    if (speech.listening) speech.stopListening()
-    else speech.listen((text) => send(text))
-  }
-
-  const avatarState = speech.speaking ? 'speaking' : speech.listening ? 'listening' : busy ? 'thinking' : 'idle'
+  const avatarState =
+    voice.speaking || speech.speaking ? 'speaking'
+    : voice.thinking || busy ? 'thinking'
+    : voice.live || speech.listening ? 'listening'
+    : 'idle'
   const sugg = SUGGESTIONS[householdMode ? 'household' : 'individual'][lang] || []
 
   return (
@@ -71,11 +94,16 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
       <div className="chat-avatar-strip">
         <Avatar state={avatarState} size={86} />
         <div className="avatar-status">
-          {avatarState === 'speaking' ? (lang === 'hi' ? 'बोल रही हूँ…' : 'Speaking…')
+          {voice.error ? `⚠️ ${voice.error}`
+            : avatarState === 'speaking' ? (lang === 'hi' ? 'बोल रही हूँ…' : 'Speaking…')
+            : avatarState === 'thinking' ? (lang === 'hi' ? 'सोच रही हूँ…' : 'Consulting your portfolio…')
+            : voice.live ? (lang === 'hi' ? 'लाइव — बोलिए…' : 'Live — just start talking')
             : avatarState === 'listening' ? (lang === 'hi' ? 'सुन रही हूँ…' : 'Listening…')
-            : avatarState === 'thinking' ? (lang === 'hi' ? 'सोच रही हूँ…' : 'Analysing your finances…')
             : householdMode ? 'Humsafar mode · advising your household' : `Advising ${customer.name.split(' ')[0]} · ${customer.risk_profile}`}
         </div>
+        <button className={`chip live-chip ${voice.live ? 'on' : ''}`} onClick={toggleLive}>
+          {voice.live ? '◼ End live' : '🎙 Live voice'}
+        </button>
         {speech.speaking && (
           <button className="chip stop-chip" onClick={speech.stopSpeaking}>◼ Stop voice</button>
         )}
@@ -112,8 +140,12 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
       </div>
 
       <div className="chat-input">
-        {speech.supported && (
-          <button className={`mic ${speech.listening ? 'on' : ''}`} onClick={mic} title="Speak">
+        {speech.supported && !voice.live && (
+          <button
+            className={`mic ${speech.listening ? 'on' : ''}`}
+            onClick={() => (speech.listening ? speech.stopListening() : speech.listen((t) => send(t)))}
+            title="Dictate (offline fallback)"
+          >
             {speech.listening ? '◼' : '🎤'}
           </button>
         )}
