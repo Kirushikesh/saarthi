@@ -31,7 +31,7 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
 
   useEffect(() => {
     setMessages([{ role: 'assistant', content: GREET[lang](customer.name) }])
-  }, [customer.id, householdMode]) // eslint-disable-line
+  }, [customer.id, householdMode, lang]) // eslint-disable-line
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
