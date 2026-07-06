@@ -10,7 +10,7 @@ from datetime import date, timedelta
 
 random.seed(42)
 
-TODAY = date(2026, 7, 6)
+TODAY = date.today()
 
 MF_SCHEMES = [
     {"name": "IDBI Nifty 50 Index Fund", "class": "Equity - Large Cap", "risk": "Moderate", "cagr3y": 14.2},
@@ -308,6 +308,38 @@ def loan_affordability(cid, loan_amount, tenure_years, loan_type="home", househo
         "monthly_surplus_after_new_emi": surplus_after,
         "total_interest_payable": emi * n - loan_amount, "verdict": verdict,
     }
+
+
+def plan_goal(cid, goal_name, household=False):
+    """Deterministic goal math: months left, required monthly saving, fair splits."""
+    c = get_customer(cid)
+    goal = next((g for g in c["goals"] if goal_name.lower() in g["name"].lower()), None)
+    if not goal:
+        return {"error": f"No goal matching '{goal_name}'. Goals: {[g['name'] for g in c['goals']]}"}
+    y, m = map(int, goal["by"].split("-"))
+    months_left = max(1, (y - TODAY.year) * 12 + m - TODAY.month)
+    remaining = max(0, goal["target"] - goal["saved"])
+    required_monthly = round(remaining / months_left)
+    out = {
+        "goal": goal["name"], "target": goal["target"], "saved": goal["saved"],
+        "remaining": remaining, "deadline": goal["by"], "months_left": months_left,
+        "required_monthly_saving": required_monthly,
+    }
+    if household and goal.get("joint") and c["partner_id"]:
+        p = get_customer(c["partner_id"])
+        total = c["monthly_income"] + p["monthly_income"]
+        out["fair_split_options"] = {
+            "equal_50_50": {c["name"]: round(required_monthly / 2), p["name"]: round(required_monthly / 2)},
+            "income_proportional": {
+                c["name"]: round(required_monthly * c["monthly_income"] / total),
+                p["name"]: round(required_monthly * p["monthly_income"] / total),
+            },
+            "income_share_pct": {
+                c["name"]: round(c["monthly_income"] / total * 100),
+                p["name"]: round(p["monthly_income"] / total * 100),
+            },
+        }
+    return out
 
 
 def create_lead(cid, product, context, household=False):

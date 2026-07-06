@@ -49,6 +49,14 @@ TOOLS = [
         }, "required": ["loan_amount", "tenure_years", "loan_type"]},
     }},
     {"type": "function", "function": {
+        "name": "plan_goal",
+        "description": "Deterministic goal-planning math for one of the customer's saved goals: months remaining, required monthly saving, and (for joint goals in household mode) fair split options — 50-50 vs income-proportional. ALWAYS use this instead of computing goal math yourself.",
+        "parameters": {"type": "object", "properties": {
+            "goal_name": {"type": "string", "description": "Name (or fragment) of the goal, e.g. 'home down payment'"},
+            "household": {"type": "boolean"},
+        }, "required": ["goal_name"]},
+    }},
+    {"type": "function", "function": {
         "name": "get_product_catalog",
         "description": "IDBI product catalog: 'vanilla' products the AI may directly recommend (FD, RD, MF SIP, PPF, NPS, SSY) with current rates, available MF schemes, and 'regulated' products that REQUIRE routing to a human RM (insurance, ULIP, PMS, AIF, direct equity advisory).",
         "parameters": {"type": "object", "properties": {}, "required": []},
@@ -119,6 +127,8 @@ def _run_tool(name, args, cid, household_mode):
             cid, args["loan_amount"], args["tenure_years"],
             args.get("loan_type", "home"), args.get("household", household_mode),
         )
+    if name == "plan_goal":
+        return data.plan_goal(cid, args["goal_name"], args.get("household", household_mode))
     if name == "get_product_catalog":
         return {"catalog": data.PRODUCT_CATALOG, "mf_schemes": data.MF_SCHEMES, "loan_rates_pct": data.LOAN_RATES}
     if name == "create_rm_lead":
