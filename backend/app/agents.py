@@ -1,76 +1,142 @@
-"""Saarthi agent orchestration.
+"""Saarthi agent brain, built on LangChain's `create_agent`.
 
-A central Orchestrator (LLM with tool use) commands specialist capabilities:
-portfolio, spending, scenario simulation, household view, product catalog and
-the Compliance & Suitability Gate that routes regulated products to an RM lead.
-
-The prototype calls the OpenAI API; the production architecture targets
-Amazon Bedrock — the orchestration layer is provider-agnostic.
+Architecture:
+- One LangChain agent per (customer, household_mode), cached. Tools are
+  closures bound to the customer so the model can never query another
+  customer's data.
+- The Compliance & Suitability Gate is real middleware (`wrap_model_call`),
+  not just prompt text: when a regulated-product intent is detected it
+  injects a hard directive into the system message and flags the event.
+- The same agent serves the text chat API and the realtime voice layer
+  (see voice.py), which delegates to it via an `ask_saarthi` tool.
 """
 
-import json
 import os
+import re
+from contextvars import ContextVar
+from typing import Callable
 
-from openai import OpenAI
+from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
+from langchain.tools import tool
+from langchain_core.messages import AIMessage, SystemMessage
 
 from . import data
 
-MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+_raw_model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+MODEL = _raw_model if ":" in _raw_model else f"openai:{_raw_model}"
 
-_client = None
-
-
-def client():
-    global _client
-    if _client is None:
-        _client = OpenAI()  # needs OPENAI_API_KEY
-    return _client
+# Per-request event log (tool calls, gate triggers) — contextvar so concurrent
+# requests don't interleave.
+_events: ContextVar[list] = ContextVar("saarthi_events")
 
 
-TOOLS = [
-    {"type": "function", "function": {
-        "name": "get_portfolio",
-        "description": "Full 360° portfolio for the current customer: net worth, asset allocation, MF holdings with returns, FDs, EPF/NPS, loans, goals, monthly SIP, average expenses and spend by category.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    }},
-    {"type": "function", "function": {
-        "name": "get_household_view",
-        "description": "Combined household (joint) view for the customer and their linked partner: combined net worth, income, expenses, SIPs, allocation and joint goals. Only works if the customer has a linked partner.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    }},
-    {"type": "function", "function": {
-        "name": "simulate_loan_affordability",
-        "description": "Scenario simulation: EMI and FOIR-based affordability check for a proposed loan, individually or for the household. Use for any 'can I/we afford X loan' question.",
-        "parameters": {"type": "object", "properties": {
-            "loan_amount": {"type": "number", "description": "Loan principal in INR"},
-            "tenure_years": {"type": "number"},
-            "loan_type": {"type": "string", "enum": ["home", "auto", "personal", "education", "mortgage"]},
-            "household": {"type": "boolean", "description": "true to assess jointly with partner"},
-        }, "required": ["loan_amount", "tenure_years", "loan_type"]},
-    }},
-    {"type": "function", "function": {
-        "name": "plan_goal",
-        "description": "Deterministic goal-planning math for one of the customer's saved goals: months remaining, required monthly saving, and (for joint goals in household mode) fair split options — 50-50 vs income-proportional. ALWAYS use this instead of computing goal math yourself.",
-        "parameters": {"type": "object", "properties": {
-            "goal_name": {"type": "string", "description": "Name (or fragment) of the goal, e.g. 'home down payment'"},
-            "household": {"type": "boolean"},
-        }, "required": ["goal_name"]},
-    }},
-    {"type": "function", "function": {
-        "name": "get_product_catalog",
-        "description": "IDBI product catalog: 'vanilla' products the AI may directly recommend (FD, RD, MF SIP, PPF, NPS, SSY) with current rates, available MF schemes, and 'regulated' products that REQUIRE routing to a human RM (insurance, ULIP, PMS, AIF, direct equity advisory).",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    }},
-    {"type": "function", "function": {
-        "name": "create_rm_lead",
-        "description": "COMPLIANCE GATE: create a qualified lead for a human Relationship Manager. MUST be used instead of giving direct advice whenever the customer asks about regulated products (insurance, ULIP, health cover, PMS, AIF, direct stocks, complex tax structuring) or explicitly asks to speak to a human.",
-        "parameters": {"type": "object", "properties": {
-            "product": {"type": "string", "description": "Product/need, e.g. 'Term Insurance'"},
-            "context": {"type": "string", "description": "1-2 line summary of the customer's need and financial context so the RM can prepare"},
-        }, "required": ["product", "context"]},
-    }},
-]
+# ---------------------------------------------------------------- compliance
+REGULATED_PATTERNS = re.compile(
+    r"insurance|ulip|term plan|health cover|mediclaim|pms|portfolio management"
+    r"|aif|alternative investment|structured product|which stock|stock tip"
+    r"|share market tip|demat|derivative|f&o|futures|options trading",
+    re.IGNORECASE,
+)
 
+GATE_DIRECTIVE = (
+    "\n\n## COMPLIANCE GATE — TRIGGERED FOR THIS TURN (overrides everything else)\n"
+    "The customer's request concerns a REGULATED product (SEBI/IRDAI domain). "
+    "You are NOT certified to advise on it. FORBIDDEN this turn: recommending, "
+    "comparing, or assessing suitability of any insurance/ULIP/PMS/AIF/stock "
+    "product — including 'X is suitable if...' framings. REQUIRED this turn: "
+    "(1) at most one neutral sentence defining the product category, "
+    "(2) call create_rm_lead EXACTLY ONCE covering the whole enquiry, "
+    "(3) tell the customer a certified IDBI Relationship Manager will call them "
+    "within 24 hours — frame it as premium service, not refusal."
+)
+
+
+class ComplianceGateMiddleware(AgentMiddleware):
+    """Framework-level guardrail: regulated-product intents cannot reach the
+    model without the handoff directive attached to the system message."""
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], ModelResponse],
+    ) -> ModelResponse:
+        last_user = next(
+            (m for m in reversed(request.messages) if m.type == "human"), None
+        )
+        if last_user and REGULATED_PATTERNS.search(str(last_user.content)):
+            try:
+                _events.get().append({"tool": "compliance_gate", "args": {"status": "TRIGGERED"}})
+            except LookupError:
+                pass
+            new_system = SystemMessage(
+                content=(request.system_message.content if request.system_message else "")
+                + GATE_DIRECTIVE
+            )
+            request = request.override(system_message=new_system)
+        return handler(request)
+
+
+# ---------------------------------------------------------------- tools
+def _build_tools(cid: str, household_mode: bool):
+    """Specialist capabilities as LangChain tools, bound to one customer."""
+
+    @tool
+    def get_portfolio() -> dict:
+        """Full 360° portfolio for the customer: net worth, asset allocation, MF
+        holdings with returns, FDs, EPF/NPS, loans, goals, monthly SIP, average
+        expenses and spend by category."""
+        return data.portfolio_summary(cid)
+
+    @tool
+    def get_household_view() -> dict:
+        """Combined household (joint) view for the customer and their linked
+        partner: combined net worth, income, expenses, SIPs, allocation and joint
+        goals. Only works if the customer has a linked partner."""
+        return data.household_summary(cid) or {"error": "No linked partner for this customer."}
+
+    @tool
+    def simulate_loan_affordability(
+        loan_amount: float,
+        tenure_years: float,
+        loan_type: str = "home",
+        household: bool = household_mode,
+    ) -> dict:
+        """Scenario simulation: EMI and FOIR-based affordability check for a
+        proposed loan (loan_type: home|auto|personal|education|mortgage),
+        individually or jointly (household=True). Use for any 'can I/we afford
+        X loan' question."""
+        return data.loan_affordability(cid, loan_amount, tenure_years, loan_type, household)
+
+    @tool
+    def plan_goal(goal_name: str, household: bool = household_mode) -> dict:
+        """Deterministic goal-planning math for one of the customer's saved
+        goals: months remaining, required monthly saving, and (for joint goals
+        in household mode) fair split options — 50-50 vs income-proportional.
+        ALWAYS use this instead of computing goal math yourself."""
+        return data.plan_goal(cid, goal_name, household)
+
+    @tool
+    def get_product_catalog() -> dict:
+        """IDBI product catalog: 'vanilla' products the AI may directly recommend
+        (FD, RD, MF SIP, PPF, NPS, SSY) with current rates, available MF schemes,
+        and 'regulated' products that REQUIRE routing to a human RM."""
+        return {"catalog": data.PRODUCT_CATALOG, "mf_schemes": data.MF_SCHEMES,
+                "loan_rates_pct": data.LOAN_RATES}
+
+    @tool
+    def create_rm_lead(product: str, context: str) -> dict:
+        """COMPLIANCE GATE handoff: create a qualified lead for a human
+        Relationship Manager. MUST be used instead of giving direct advice for
+        regulated products (insurance, ULIP, health cover, PMS, AIF, direct
+        stocks) or when the customer asks for a human."""
+        return {"lead_created": data.create_lead(cid, product, context, household_mode)}
+
+    return [get_portfolio, get_household_view, simulate_loan_affordability,
+            plan_goal, get_product_catalog, create_rm_lead]
+
+
+# ---------------------------------------------------------------- prompt
 SYSTEM_TEMPLATE = """You are Saarthi, IDBI Bank's avatar-based AI wealth companion, embedded in the IDBI mobile banking app.
 
 ## Current customer
@@ -80,10 +146,10 @@ SYSTEM_TEMPLATE = """You are Saarthi, IDBI Bank's avatar-based AI wealth compani
 ## Language
 Reply in the language the customer writes/speaks in. If they write in Hindi (Devanagari or romanized), reply in Hindi. Default: English with Indian conventions (lakh/crore, ₹).
 
-## Advisory rules (Compliance & Suitability Gate — non-negotiable)
+## Advisory rules
 1. You MAY directly analyse, educate and recommend VANILLA products: FDs, RDs, mutual fund SIPs (suitability-based, at asset-class AND specific IDBI scheme level from the catalog), PPF, NPS, SSY, budgeting and goal planning.
 2. Every recommendation must be SUITABILITY-BASED: consider age, risk profile, income, existing allocation, goals and time horizon. Briefly state why it suits them.
-3. You MUST NOT give direct advice on regulated products: any insurance (term/health/ULIP), PMS, AIF, structured products, direct stock tips, or complex tax structuring. For these, call create_rm_lead and tell the customer a certified IDBI Relationship Manager will call them — position it as a premium service, not a refusal. You may explain generic concepts (e.g., what term insurance is) before handing off.
+3. Regulated products (insurance, ULIP, PMS, AIF, direct stocks, complex tax structuring) are handled by certified human RMs — use create_rm_lead for those.
 4. Never fabricate holdings or numbers — always fetch via tools. Use ₹ and Indian number formatting (e.g., ₹12.5 lakh, ₹1.2 crore).
 5. Include a one-line disclaimer when recommending market-linked products: "Mutual fund investments are subject to market risks."
 
@@ -117,56 +183,67 @@ def _system_prompt(customer, household_mode):
     return SYSTEM_TEMPLATE.format(profile=profile, household_note=household_note, household_mode_note=hm)
 
 
-def _run_tool(name, args, cid, household_mode):
-    if name == "get_portfolio":
-        return data.portfolio_summary(cid)
-    if name == "get_household_view":
-        return data.household_summary(cid) or {"error": "No linked partner for this customer."}
-    if name == "simulate_loan_affordability":
-        return data.loan_affordability(
-            cid, args["loan_amount"], args["tenure_years"],
-            args.get("loan_type", "home"), args.get("household", household_mode),
+# ---------------------------------------------------------------- agents
+_agents = {}
+
+
+def get_agent(cid: str, household_mode: bool):
+    key = (cid, household_mode)
+    if key not in _agents:
+        customer = data.get_customer(cid)
+        _agents[key] = create_agent(
+            model=MODEL,
+            tools=_build_tools(cid, household_mode),
+            system_prompt=_system_prompt(customer, household_mode),
+            middleware=[ComplianceGateMiddleware()],
         )
-    if name == "plan_goal":
-        return data.plan_goal(cid, args["goal_name"], args.get("household", household_mode))
-    if name == "get_product_catalog":
-        return {"catalog": data.PRODUCT_CATALOG, "mf_schemes": data.MF_SCHEMES, "loan_rates_pct": data.LOAN_RATES}
-    if name == "create_rm_lead":
-        return {"lead_created": data.create_lead(cid, args["product"], args["context"], household_mode)}
-    return {"error": f"unknown tool {name}"}
+    return _agents[key]
 
 
 def chat(cid, message, history, household_mode=False):
-    """Run one orchestrated turn. Returns reply text + events (tools used, lead)."""
+    """Run one agent turn. Returns reply text + events (tools used, lead)."""
     customer = data.get_customer(cid)
     if not customer:
         return {"reply": "Unknown customer.", "events": []}
 
-    messages = [{"role": "system", "content": _system_prompt(customer, household_mode)}]
-    for h in history[-12:]:
-        messages.append({"role": h["role"], "content": h["content"]})
+    agent = get_agent(cid, household_mode)
+    messages = [{"role": h["role"], "content": h["content"]} for h in history[-12:]]
     messages.append({"role": "user", "content": message})
 
-    events, lead = [], None
-    for _ in range(6):  # tool loop
-        resp = client().chat.completions.create(
-            model=MODEL, messages=messages, tools=TOOLS, temperature=0.4,
+    token = _events.set([])
+    leads_before = len(data.LEADS)
+    try:
+        result = agent.invoke({"messages": messages})
+        events = _events.get()
+    finally:
+        _events.reset(token)
+
+    for m in result["messages"]:
+        if isinstance(m, AIMessage) and m.tool_calls:
+            events.extend({"tool": tc["name"], "args": tc["args"]} for tc in m.tool_calls)
+
+    lead = data.LEADS[-1] if len(data.LEADS) > leads_before else None
+    reply = result["messages"][-1].content
+    if isinstance(reply, list):  # content blocks -> plain text
+        reply = "".join(b.get("text", "") for b in reply if isinstance(b, dict))
+
+    # Deterministic gate enforcement: if the gate fired but the model skipped
+    # the handoff, the handoff happens anyway — compliance can't depend on the
+    # model feeling like it.
+    gate_fired = any(e["tool"] == "compliance_gate" for e in events)
+    if gate_fired and lead is None:
+        lead = data.create_lead(
+            cid, "Regulated product enquiry",
+            f"Auto-routed by compliance gate. Customer asked: {message[:200]}",
+            household_mode,
         )
-        msg = resp.choices[0].message
-        if not msg.tool_calls:
-            return {"reply": msg.content or "", "events": events, "lead": lead}
-        messages.append(msg)
-        for tc in msg.tool_calls:
-            args = json.loads(tc.function.arguments or "{}")
-            result = _run_tool(tc.function.name, args, cid, household_mode)
-            events.append({"tool": tc.function.name, "args": args})
-            if isinstance(result, dict) and "lead_created" in result:
-                lead = result["lead_created"]
-            messages.append({
-                "role": "tool", "tool_call_id": tc.id,
-                "content": json.dumps(result, default=str),
-            })
-    return {"reply": "I gathered the data but ran out of steps — please ask again.", "events": events, "lead": lead}
+        events.append({"tool": "create_rm_lead", "args": {"auto": True}})
+        reply += (
+            "\n\nSince this involves a regulated product, I've arranged for a "
+            "certified IDBI Relationship Manager to call you within 24 hours "
+            "to guide you personally."
+        )
+    return {"reply": reply, "events": events, "lead": lead}
 
 
 def nudges(cid):
