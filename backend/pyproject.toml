@@ -1,0 +1,20 @@
+[project]
+name = "saarthi-backend"
+version = "0.1.0"
+description = "Saarthi API — agent-orchestrated AI wealth advisory for IDBI Innovate 2026 (Track 1)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "openai>=1.59",
+    "pydantic>=2.10",
+    "python-dotenv>=1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: saarthi-backend
+Version: 0.1.0
+Summary: Saarthi API — agent-orchestrated AI wealth advisory for IDBI Innovate 2026 (Track 1)
+Requires-Python: >=3.12
+Requires-Dist: fastapi>=0.115
+Requires-Dist: uvicorn[standard]>=0.34
+Requires-Dist: openai>=1.59
+Requires-Dist: pydantic>=2.10
+Requires-Dist: python-dotenv>=1.0
