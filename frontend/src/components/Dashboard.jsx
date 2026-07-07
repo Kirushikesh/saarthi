@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { api, inr } from '../api'
+import { speakPlain } from '../useSpeech'
 
 const COLORS = ['#0d9488', '#f59e0b', '#0369a1', '#7c3aed', '#e11d48']
+
+// Read-aloud with speech-friendly Indian notation (₹12.5 L → "rupees 12.5 lakh")
+const say = (text, lang) =>
+  speakPlain(text.replaceAll('₹', 'rupees ').replace(/\bCr\b/g, 'crore').replace(/\bL\b/g, 'lakh'), lang)
 
 function MarketPulse({ market }) {
   const pi = market.portfolio_impact
@@ -30,14 +35,18 @@ function MarketPulse({ market }) {
   )
 }
 
-function HealthGauge({ health }) {
+function HealthGauge({ health, lang }) {
   const R = 52, C = Math.PI * R // semicircle circumference
   const color = health.score >= 80 ? '#16a34a' : health.score >= 60 ? '#0d9488' : health.score >= 40 ? '#f59e0b' : '#e11d48'
   return (
     <div className="card">
-      <div className="card-title">Financial Health Score</div>
+      <div className="card-title">Financial Health Score
+        <button className="readaloud" title="Read aloud" aria-label="Read your health score aloud"
+          onClick={() => say(`Your financial health score is ${health.score} out of 100 — ${health.grade}.`, lang)}>🔊</button>
+      </div>
       <div className="health-row">
-        <svg width="130" height="76" viewBox="0 0 130 76">
+        <svg width="130" height="76" viewBox="0 0 130 76" role="img"
+          aria-label={`Financial health score ${health.score} out of 100, ${health.grade}`}>
           <path d="M 13 68 A 52 52 0 0 1 117 68" fill="none" stroke="#e2e8f0" strokeWidth="11" strokeLinecap="round" />
           <path d="M 13 68 A 52 52 0 0 1 117 68" fill="none" stroke={color} strokeWidth="11" strokeLinecap="round"
             strokeDasharray={`${(health.score / 100) * C} ${C}`} />
@@ -93,7 +102,7 @@ function AuditTrailCard({ trail }) {
   )
 }
 
-export default function Dashboard({ customer }) {
+export default function Dashboard({ customer, lang }) {
   const [p, setP] = useState(null)
   const [nudges, setNudges] = useState([])
   const [health, setHealth] = useState(null)
@@ -121,7 +130,10 @@ export default function Dashboard({ customer }) {
   return (
     <div className="dash">
       <div className="networth-card">
-        <div className="nw-label">Net Worth</div>
+        <div className="nw-label">Net Worth
+          <button className="readaloud light" title="Read aloud" aria-label="Read your net worth aloud"
+            onClick={() => say(`Your net worth is ${inr(p.net_worth)}. Assets ${inr(p.total_assets)}, liabilities ${inr(p.total_liabilities)}, monthly SIP ${inr(p.monthly_sip)}.`, lang)}>🔊</button>
+        </div>
         <div className="nw-value">{inr(p.net_worth)}</div>
         <div className="nw-sub">
           Assets {inr(p.total_assets)} · Liabilities {inr(p.total_liabilities)} · SIP {inr(p.monthly_sip)}/mo
@@ -130,7 +142,7 @@ export default function Dashboard({ customer }) {
 
       {market && <MarketPulse market={market} />}
 
-      {health && <HealthGauge health={health} />}
+      {health && <HealthGauge health={health} lang={lang} />}
 
       {behavior && <BehaviorCard behavior={behavior} />}
 

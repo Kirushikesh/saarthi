@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { LANGS } from './i18n'
+import { speakPlain } from './useSpeech'
 import Chat from './components/Chat'
 import Dashboard from './components/Dashboard'
 import Humsafar from './components/Humsafar'
@@ -19,6 +20,9 @@ export default function App() {
   const [tab, setTab] = useState('advisor')
   const [lang, setLang] = useState('en')
   const [voiceOn, setVoiceOn] = useState(true)
+  // Sugam mode = accessibility mode: larger type, higher contrast, bigger
+  // touch targets, and the agent replies in simple jargon-free language.
+  const [sugam, setSugam] = useState(() => localStorage.getItem('sugam') === '1')
   const [householdMode, setHouseholdMode] = useState(false)
   const [leadFlash, setLeadFlash] = useState(false)
   const [consent, setConsent] = useState(null) // consent status when modal is open
@@ -43,6 +47,8 @@ export default function App() {
         if (fresh.length > 0) {
           setToast(fresh[0])
           setTimeout(() => setToast(null), 6000)
+          // Sugam mode: proactive alerts are spoken, not just shown
+          if (localStorage.getItem('sugam') === '1') speakPlain(fresh[0].title)
         }
       } catch { /* backend not up yet */ }
     }
@@ -50,6 +56,12 @@ export default function App() {
     timer = setInterval(poll, 5000)
     return () => clearInterval(timer)
   }, [customer])
+
+  const toggleSugam = () => {
+    const next = !sugam
+    setSugam(next)
+    localStorage.setItem('sugam', next ? '1' : '0')
+  }
 
   const openNotifs = async () => {
     const opening = !notifOpen
@@ -71,7 +83,7 @@ export default function App() {
   if (!customer) {
     return (
       <div className="shell">
-        <div className="phone">
+        <div className={`phone ${sugam ? 'sugam' : ''}`}>
           <Login onSelect={(c) => { setCustomer(c); setHouseholdMode(false); setTab('advisor') }} />
         </div>
         <Sidebar />
@@ -81,21 +93,28 @@ export default function App() {
 
   return (
     <div className="shell">
-      <div className="phone">
+      <div className={`phone ${sugam ? 'sugam' : ''}`}>
         <header className="appbar">
-          <button className="back" onClick={() => setCustomer(null)}>‹</button>
+          <button className="back" onClick={() => setCustomer(null)} aria-label="Sign out and go back">‹</button>
           <div className="appbar-title">
             <b>Saarthi</b>
             <span className="appbar-sub">IDBI Mobile · {customer.name.split(' ')[0]}</span>
           </div>
           <div className="appbar-actions">
-            <button className="toggle bell" onClick={openNotifs} title="Saarthi noticed">
-              🔔{notifs.unread > 0 && <span className="bell-badge">{notifs.unread}</span>}
+            <button className="toggle bell" onClick={openNotifs} title="Saarthi noticed"
+              aria-label={`Notifications, ${notifs.unread} unread`}>
+              🔔{notifs.unread > 0 && <span className="bell-badge" aria-hidden="true">{notifs.unread}</span>}
             </button>
-            <select className="lang-select" value={lang} onChange={(e) => setLang(e.target.value)} title="Language">
+            <select className="lang-select" value={lang} onChange={(e) => setLang(e.target.value)} title="Language" aria-label="Language">
               {LANGS.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
             </select>
-            <button className={`toggle ${voiceOn ? 'on' : ''}`} onClick={() => setVoiceOn(!voiceOn)} title="Voice replies">
+            <button className={`toggle ${sugam ? 'on' : ''}`} onClick={toggleSugam}
+              title="Sugam mode — larger text, high contrast, simple language"
+              aria-label="Sugam accessibility mode" aria-pressed={sugam}>
+              ♿
+            </button>
+            <button className={`toggle ${voiceOn ? 'on' : ''}`} onClick={() => setVoiceOn(!voiceOn)}
+              title="Voice replies" aria-label="Spoken replies" aria-pressed={voiceOn}>
               {voiceOn ? '🔊' : '🔇'}
             </button>
           </div>
@@ -111,8 +130,8 @@ export default function App() {
         )}
 
         {toast && !notifOpen && (
-          <div className="notif-toast" onClick={() => { setToast(null); openNotifs() }}>
-            <span className="notif-toast-icon">{toast.icon}</span>
+          <div className="notif-toast" role="status" onClick={() => { setToast(null); openNotifs() }}>
+            <span className="notif-toast-icon" aria-hidden="true">{toast.icon}</span>
             <div>
               <div className="notif-toast-title">{toast.title}</div>
               <div className="notif-toast-sub">Saarthi noticed this for you · tap to view</div>
@@ -132,12 +151,13 @@ export default function App() {
             )}
             {notifs.items.map((n) => (
               <div key={n.id} className={`notif-row ${n.source === 'rm' ? 'rm' : ''}`}>
-                <span className="nudge-icon">{n.icon}</span>
+                <span className="nudge-icon" aria-hidden="true">{n.icon}</span>
                 <div>
                   <div className="nudge-title">{n.title}</div>
                   <div className="nudge-body">{n.body}</div>
                   <div className="notif-meta">{n.source === 'rm' ? 'From your Relationship Manager' : 'Heartbeat insight'} · {n.ts.replace('T', ' ')}</div>
                 </div>
+                <button className="readaloud" onClick={() => speakPlain(`${n.title}. ${n.body}`, lang)} aria-label="Read this notification aloud" title="Read aloud">🔊</button>
               </div>
             ))}
           </div>
@@ -162,18 +182,20 @@ export default function App() {
               householdMode={householdMode}
               lang={lang}
               voiceOn={voiceOn}
+              sugam={sugam}
               onLead={() => { setLeadFlash(true); setTimeout(() => setLeadFlash(false), 4000) }}
             />
           )}
-          {tab === 'dashboard' && <Dashboard customer={customer} />}
+          {tab === 'dashboard' && <Dashboard customer={customer} lang={lang} />}
           {tab === 'humsafar' && <Humsafar customer={customer} />}
           {tab === 'rm' && <RMConsole />}
         </main>
 
-        <nav className="tabbar">
+        <nav className="tabbar" aria-label="Main sections">
           {TABS.map((t) => (
-            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''} ${t.id === 'rm' && leadFlash ? 'flash' : ''}`} onClick={() => setTab(t.id)}>
-              <span className="tab-icon">{t.icon}</span>
+            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''} ${t.id === 'rm' && leadFlash ? 'flash' : ''}`}
+              onClick={() => setTab(t.id)} aria-current={tab === t.id ? 'page' : undefined}>
+              <span className="tab-icon" aria-hidden="true">{t.icon}</span>
               <span>{t.label}</span>
             </button>
           ))}
@@ -240,6 +262,7 @@ function Sidebar() {
         <li><b>🫀 Proactive heartbeat</b> — a background pulse scans every portfolio against today's market and reaches out first: 🔔 alerts arrive unprompted</li>
         <li><b>🛡️ Compliance gate + RM copilot</b> — regulated intents detected in all 7 languages (multilingual patterns + LLM backstop), routed to human RMs as qualified leads with an AI pre-meeting brief the RM just approves</li>
         <li><b>👫 Humsafar mode</b> — India's first household-level advisory: joint net worth, joint goals & an impartial money mediator, with a monthly "State of our Union" report</li>
+        <li><b>♿ Sugam mode</b> — banking for every customer: larger text & touch targets, high contrast, spoken alerts, screen-reader support, and the advisor switches to simple jargon-free language (RPwD-Act-aligned)</li>
       </ul>
       <p className="side-note">Synthetic data only · Prototype for IDBI Innovate 2026 · Team FinFusion.AI</p>
     </aside>

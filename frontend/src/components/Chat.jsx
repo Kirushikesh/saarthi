@@ -7,7 +7,7 @@ import Avatar from './Avatar'
 
 import { GREET, SUGGESTIONS, UI, t } from '../i18n'
 
-export default function Chat({ customer, householdMode, lang, voiceOn, onLead }) {
+export default function Chat({ customer, householdMode, lang, voiceOn, sugam, onLead }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -57,6 +57,7 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
     try {
       const res = await api.chat({
         customer_id: customer.id, message: msg, history, household_mode: householdMode,
+        sugam_mode: !!sugam,
       })
       setMessages((m) => [...m, { role: 'assistant', content: res.reply, lead: res.lead, events: res.events }])
       if (res.lead) onLead?.(res.lead)
@@ -79,7 +80,7 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
     <div className="chat">
       <div className="chat-avatar-strip">
         <Avatar state={avatarState} size={86} />
-        <div className="avatar-status">
+        <div className="avatar-status" role="status">
           {voice.error ? `⚠️ ${voice.error}`
             : avatarState === 'speaking' ? (lang === 'hi' ? 'बोल रही हूँ…' : 'Speaking…')
             : avatarState === 'thinking' ? (lang === 'hi' ? 'सोच रही हूँ…' : 'Consulting your portfolio…')
@@ -95,7 +96,7 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
         )}
       </div>
 
-      <div className="chat-scroll">
+      <div className="chat-scroll" role="log" aria-live="polite" aria-label="Conversation with Saarthi">
         {messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`}>
             <ReactMarkdown>{m.content}</ReactMarkdown>
@@ -131,6 +132,8 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
             className={`mic ${speech.listening ? 'on' : ''}`}
             onClick={() => (speech.listening ? speech.stopListening() : speech.listen((t) => send(t)))}
             title="Dictate (offline fallback)"
+            aria-label={speech.listening ? 'Stop dictating' : 'Dictate your question'}
+            aria-pressed={speech.listening}
           >
             {speech.listening ? '◼' : '🎤'}
           </button>
@@ -140,8 +143,9 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
           placeholder={t(UI.placeholder, lang)}
+          aria-label={t(UI.placeholder, lang)}
         />
-        <button className="send" onClick={() => send()} disabled={busy || !input.trim()}>➤</button>
+        <button className="send" onClick={() => send()} disabled={busy || !input.trim()} aria-label="Send message">➤</button>
       </div>
     </div>
   )

@@ -362,13 +362,26 @@ Tool outputs arrive as English JSON — that NEVER changes your reply language; 
 
 ## Household (Humsafar) mode
 {household_mode_note}
-
+{sugam_note}
 ## Style
 Warm, concise, confident — like a trusted personal banker. Use short paragraphs and markdown bullets/tables where helpful. Numbers first, then interpretation. For scenario simulations, show the key numbers (EMI, FOIR, surplus) and a clear verdict. Keep answers under ~250 words unless deep analysis is asked for.
 """
 
+# Accessibility overlay — injected when the customer switches on Sugam mode
+# (larger text + simple language for elderly, low-literacy and first-time
+# investors). Overrides the Style section where they conflict.
+SUGAM_NOTE = """
+## Sugam mode (accessibility — ACTIVE, overrides Style where they conflict)
+The customer has asked for simple, easy language. In every reply:
+- Use everyday words a 10-year-old would follow; sentences under 15 words.
+- No jargon. If a term is unavoidable (SIP, FD, EMI, FOIR), explain it in one plain phrase the first time, e.g. "EMI (the fixed amount you pay every month)".
+- Keep replies under ~120 words. Prefer 2-4 short bullets over tables.
+- End with one clear next step the customer can take.
+- All other rules (language, suitability, compliance) still apply fully.
+"""
 
-def _system_prompt(customer, household_mode):
+
+def _system_prompt(customer, household_mode, sugam_mode=False):
     p = data.portfolio_summary(customer["id"])
     profile = (
         f"- {customer['name']}, {customer['age']}, {customer['occupation']}\n"
@@ -387,11 +400,14 @@ def _system_prompt(customer, household_mode):
         if household_mode else
         "Not active. Advise the individual customer. If a question inherently concerns their partner/household finances and they have a linked partner, you may suggest switching to Humsafar mode."
     )
-    return SYSTEM_TEMPLATE.format(profile=profile, household_note=household_note, household_mode_note=hm)
+    return SYSTEM_TEMPLATE.format(
+        profile=profile, household_note=household_note, household_mode_note=hm,
+        sugam_note=SUGAM_NOTE if sugam_mode else "",
+    )
 
 
 # ---------------------------------------------------------------- agents
-def get_agent(cid: str, household_mode: bool):
+def get_agent(cid: str, household_mode: bool, sugam_mode: bool = False):
     """Built fresh per turn: the system prompt embeds live portfolio figures
     (net worth, SIP, expenses), so a cached agent would serve stale numbers
     the moment a transaction lands — and an unbounded cache doesn't scale
@@ -400,18 +416,18 @@ def get_agent(cid: str, household_mode: bool):
     return create_agent(
         model=MODEL,
         tools=_build_tools(cid, household_mode),
-        system_prompt=_system_prompt(customer, household_mode),
+        system_prompt=_system_prompt(customer, household_mode, sugam_mode),
         middleware=[ComplianceGateMiddleware()],
     )
 
 
-def chat(cid, message, history, household_mode=False):
+def chat(cid, message, history, household_mode=False, sugam_mode=False):
     """Run one agent turn. Returns reply text + events (tools used, lead)."""
     customer = data.get_customer(cid)
     if not customer:
         return {"reply": "Unknown customer.", "events": []}
 
-    agent = get_agent(cid, household_mode)
+    agent = get_agent(cid, household_mode, sugam_mode)
     messages = [{"role": h["role"], "content": h["content"]} for h in history[-12:]]
     messages.append({"role": "user", "content": message})
 

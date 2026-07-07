@@ -1,8 +1,9 @@
 export default function Avatar({ state = 'idle', size = 120 }) {
   // state: idle | listening | speaking | thinking
   return (
-    <div className={`avatar avatar-${state}`} style={{ width: size, height: size }}>
-      <svg viewBox="0 0 120 120" width={size} height={size}>
+    <div className={`avatar avatar-${state}`} style={{ width: size, height: size }}
+      role="img" aria-label={`Saarthi, your advisor — ${state}`}>
+      <svg viewBox="0 0 120 120" width={size} height={size} aria-hidden="true">
         <defs>
           <linearGradient id="avbg" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stopColor="#0d9488" />

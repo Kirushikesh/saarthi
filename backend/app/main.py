@@ -36,6 +36,7 @@ class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []
     household_mode: bool = False
+    sugam_mode: bool = False  # accessibility: simple language, short replies
 
 
 @app.get("/api/health")
@@ -211,7 +212,7 @@ def chat(req: ChatRequest):
     if not data.get_customer(req.customer_id):
         raise HTTPException(404, "customer not found")
     try:
-        return agents.chat(req.customer_id, req.message, req.history, req.household_mode)
+        return agents.chat(req.customer_id, req.message, req.history, req.household_mode, req.sugam_mode)
     except Exception as e:  # surface LLM/config errors readably in the demo UI
         raise HTTPException(502, f"Advisor temporarily unavailable: {e}")
 

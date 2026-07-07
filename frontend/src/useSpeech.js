@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { bcp47 } from './i18n'
 
+// Standalone read-aloud for screen-optional banking: any component can have
+// numbers/notifications spoken without wiring up the full speech hook.
+export function speakPlain(text, lang = 'en') {
+  if (!window.speechSynthesis) return
+  window.speechSynthesis.cancel()
+  const plain = String(text).replace(/[*#_`>|]/g, ' ').replace(/\s+/g, ' ').trim()
+  const u = new SpeechSynthesisUtterance(plain.slice(0, 500))
+  const target = bcp47(lang)
+  const voices = window.speechSynthesis.getVoices()
+  u.voice = voices.find((v) => v.lang === target) || voices.find((v) => v.lang.startsWith(target.slice(0, 2))) || null
+  u.lang = target
+  window.speechSynthesis.speak(u)
+}
+
 export function useSpeech(lang) {
   const [listening, setListening] = useState(false)
   const [speaking, setSpeaking] = useState(false)

@@ -26,6 +26,7 @@ Saarthi is an avatar-based, multilingual AI wealth advisor designed to embed ins
 | 📜 State of our Union | One-tap monthly household report: headline, cash flow, both partners' health scores, joint goals with fair splits, retirement check and three actions — deterministic numbers, AI narration |
 | 🫀 Proactive heartbeat | A background pulse (LLM-free, deterministic) rescans every customer's portfolio against today's market and **reaches out first** — 🔔 notifications arrive unprompted: market impact on your funds, allocation gaps, idle surplus, thin emergency buffers, off-track goals, unclaimed tax savings |
 | 📋 RM copilot | For every gated lead, Saarthi preps the RM with an AI pre-meeting brief (profile, ₹ snapshot, suitability signals, talking points) and a drafted customer reply — the **RM approves, the AI produces**; approved messages land in the customer's notification feed |
+| ♿ Sugam mode | Banking for every customer (RPwD Act 2016 / WCAG-aligned): one-tap accessibility mode with larger text & touch targets, high contrast, spoken proactive alerts, tap-to-hear net worth / health score / notifications, screen-reader semantics (ARIA live regions, keyboard focus), reduced-motion support — and the advisor switches to **simple, jargon-free replies** in all 7 languages |
 
 ## Architecture
 
