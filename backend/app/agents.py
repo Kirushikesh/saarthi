@@ -68,40 +68,75 @@ REGULATED_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-GATE_CLASSIFIER_PROMPT = """You are the compliance intent detector for an Indian bank's AI wealth advisor.
+# Vanilla allow-list: unambiguous permitted-product terms (multilingual). A hit
+# here short-circuits to "not regulated" WITHOUT an LLM call — but only AFTER the
+# regulated fast-path has run, so a message naming a regulated product (which
+# always trips REGULATED_PATTERNS) can never be waved through. Deliberately
+# excludes broad words that can front a regulated ask ("invest", "market",
+# "share") — those fall through to the LLM. Net effect: the LLM only judges the
+# keyword-free ambiguous middle, so common vanilla queries are deterministic.
+VANILLA_PATTERNS = re.compile(
+    r"\bloan\b|\bemi\b|home loan|\bmutual fund|\bmutual\b|\bsip\b|\bfd\b"
+    r"|fixed deposit|recurring deposit|\bppf\b|\bnps\b|\bssy\b|sukanya"
+    r"|retire|retirement|\bpension\b|\btax\b|\b80c\b|80ccd|emergency fund|budget"
+    # loan (native scripts)
+    r"|लोन|कर्ज|ऋण|கடன்|రుణ|లోన్|ಸಾಲ|ঋণ|লোন"
+    # retirement (native scripts)
+    r"|रिटायरमेंट|निवृत्ती|निवृत्ति|ஓய்வு|రిటైర్మెంట్|ನಿವೃತ್ತಿ|অবসর"
+    # mutual fund (native scripts)
+    r"|म्यूचुअल|மியூச்சுவல்|మ్యూచువల్|ಮ್ಯೂಚುವಲ್|মিউচুয়াল",
+    re.IGNORECASE,
+)
+
+GATE_CLASSIFIER_PROMPT = """You are the compliance intent detector for an Indian bank's AI wealth advisor. Classify the customer's LATEST message.
 
 REGULATED (route to a certified human): the message seeks advice, comparison, purchase help or suitability on products the AI may not advise — insurance of ANY kind (term/life/health/ULIP/endowment/money-back plans), PMS, AIF, structured products, direct stocks/shares/demat/derivatives/F&O, or a specific insurer's plan (e.g. "LIC Jeevan Anand").
 
 VANILLA (the AI handles it): the customer's own portfolio and its performance, mutual funds/SIPs, FDs/RDs, PPF/NPS/SSY, budgeting, spending, goals, retirement planning, taxes, loans/EMIs, market levels and news, greetings — in ANY language.
 
-The message may be in any Indian language/script, romanized, or code-mixed. Judge the INTENT, not the language. When uncertain, answer VANILLA — a separate keyword layer already catches explicit regulated-product mentions.
+Use the prior turns ONLY to resolve an ambiguous latest message: a bare follow-up like "which one is best for me?" or "should I go for it?" inherits the topic of the conversation — REGULATED if that topic was insurance/stocks/etc., VANILLA if it was mutual funds/deposits/goals. Judge INTENT, not language. When still uncertain, answer VANILLA — a separate keyword layer already catches explicit regulated-product mentions.
 
 Examples:
 "என் முதலீடுகள் எப்படி போகின்றன?" → VANILLA (own investments)
 "मेरे लिए कौन सा म्यूचुअल फंड सही रहेगा?" → VANILLA (mutual funds are permitted)
 "I need something to cover hospital bills if I fall sick" → REGULATED (health insurance intent)
-"कौन सा शेयर खरीदूं?" → REGULATED (direct stocks)
+[prior turn was about ULIPs] "which of those suits me?" → REGULATED (follow-up inherits the ULIP topic)
+[prior turn listed the customer's mutual funds] "which one is best for me?" → VANILLA
 
-Reply with exactly one word: REGULATED or VANILLA.
+Conversation so far (prior turns, oldest first):
+{context}
 
-Message: {msg}"""
+Latest customer message: {msg}
+
+Reply with exactly one word: REGULATED or VANILLA."""
 
 _gate_model = None
 _gate_cache: dict[str, bool] = {}
 
 
-def _classify_regulated(text: str) -> bool:
-    """LLM backstop for the compliance gate. Cached per message (the
-    middleware wraps every model call in a multi-tool turn). Fails open —
+def _msg_text(m) -> str:
+    """Plain text of a message whose content may be a string or content blocks."""
+    c = getattr(m, "content", m)
+    if isinstance(c, list):
+        return "".join(b.get("text", "") for b in c if isinstance(b, dict))
+    return str(c)
+
+
+def _classify_regulated(text: str, context: str = "") -> bool:
+    """LLM backstop for the compliance gate. Sees the latest message plus a
+    short transcript of prior turns, so ambiguous follow-ups ('which one is
+    best for me?') inherit the conversation's topic. Cached per (context+text)
+    — the middleware wraps every model call in a multi-tool turn. Fails open:
     the keyword fast-path and the deterministic lead fallback still stand."""
     global _gate_model
-    key = text.strip().lower()[:300]
+    key = (context[-500:] + "||" + text).strip().lower()[:800]
     if key in _gate_cache:
         return _gate_cache[key]
     try:
         if _gate_model is None:
             _gate_model = init_chat_model(MODEL, temperature=0)
-        out = _gate_model.invoke(GATE_CLASSIFIER_PROMPT.format(msg=text[:600]))
+        out = _gate_model.invoke(GATE_CLASSIFIER_PROMPT.format(
+            context=context or "(no prior turns)", msg=text[:600]))
         flag = str(out.content).strip().upper().startswith("REGULATED")
     except Exception:
         flag = False
@@ -111,11 +146,17 @@ def _classify_regulated(text: str) -> bool:
     return flag
 
 
-def detect_regulated(text: str):
-    """Returns the detector that fired ('pattern' | 'llm') or None."""
+def detect_regulated(text: str, context: str = ""):
+    """Returns the detector that fired ('pattern' | 'llm') or None. Three layers:
+    (1) regulated keyword fast-path (latest message only — a topic mentioned
+    turns ago shouldn't re-trigger); (2) vanilla allow-list short-circuit, so
+    common permitted queries never touch the LLM; (3) LLM backstop for the
+    keyword-free ambiguous middle, given `context` to resolve follow-ups."""
     if REGULATED_PATTERNS.search(text):
         return "pattern"
-    if _classify_regulated(text):
+    if VANILLA_PATTERNS.search(text):
+        return None
+    if _classify_regulated(text, context):
         return "llm"
     return None
 
@@ -144,7 +185,17 @@ class ComplianceGateMiddleware(AgentMiddleware):
         last_user = next(
             (m for m in reversed(request.messages) if m.type == "human"), None
         )
-        detector = detect_regulated(str(last_user.content)) if last_user else None
+        detector = None
+        if last_user:
+            # Short transcript of the turns before the latest human message, so
+            # the LLM backstop can resolve ambiguous follow-ups by topic.
+            idx = next(i for i, m in enumerate(request.messages) if m is last_user)
+            prior = [m for m in request.messages[:idx] if m.type in ("human", "ai")][-4:]
+            context = "\n".join(
+                f"{'Customer' if m.type == 'human' else 'Saarthi'}: {_msg_text(m)[:200]}"
+                for m in prior if _msg_text(m).strip()
+            )
+            detector = detect_regulated(_msg_text(last_user), context)
         if detector:
             try:
                 evs = _events.get()

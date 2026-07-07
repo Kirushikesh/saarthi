@@ -43,6 +43,44 @@ def test_gate_pattern_no_false_positive(q):
     assert not agents.REGULATED_PATTERNS.search(q), f"pattern false positive: {q}"
 
 
+# ---------------------------------------------------------------- gate layering
+# The vanilla allow-list short-circuits common permitted queries to "not
+# regulated" WITHOUT an LLM call, so detect_regulated is deterministic here.
+VANILLA_SHORTCIRCUIT = [
+    "Can I afford a 50 lakh home loan for 20 years?",
+    "क्या मैं 50 लाख का होम लोन ले सकता हूँ?",     # Hindi home loan
+    "20 வருடத்திற்கு 50 லட்சம் வீட்டுக் கடன் வாங்க முடியுமா?",  # Tamil loan
+    "20 ఏళ్లకు 50 లక్షల హోమ్ లోన్ తీసుకోగలనా?",   # Telugu loan
+    "Tell me about NPS",
+    "How much should I save for retirement?",
+    "How can I save tax this year?",
+]
+
+
+@pytest.mark.parametrize("q", VANILLA_SHORTCIRCUIT)
+def test_vanilla_allowlist_shortcircuits_without_llm(q):
+    # VANILLA_PATTERNS must hit AND regulated must not — so detect_regulated
+    # returns None before reaching the LLM backstop.
+    assert agents.VANILLA_PATTERNS.search(q), f"vanilla allow-list missed: {q}"
+    assert agents.detect_regulated(q) is None, f"vanilla query gated: {q}"
+
+
+def test_regulated_wins_when_both_keywords_present():
+    # "mutual fund" (vanilla) + "ULIP" (regulated) → regulated fast-path wins,
+    # because the regulated check runs before the vanilla short-circuit.
+    q = "Should I move my mutual fund money into a ULIP?"
+    assert agents.VANILLA_PATTERNS.search(q)
+    assert agents.detect_regulated(q) == "pattern"
+
+
+def test_bare_followup_has_no_keyword_either_way():
+    # The ambiguous multi-turn follow-up matches neither list — which is why the
+    # LLM backstop (with conversation context) is needed to resolve it.
+    q = "Which one would be best for someone like me?"
+    assert not agents.REGULATED_PATTERNS.search(q)
+    assert not agents.VANILLA_PATTERNS.search(q)
+
+
 # ---------------------------------------------------------------- classifier
 def test_classifier_full_coverage():
     for cid, stats in data.CLASSIFIER_STATS.items():
