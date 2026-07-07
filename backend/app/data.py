@@ -205,6 +205,54 @@ for c in CUSTOMERS.values():
 # In-memory RM lead queue (prototype scope; RDS/DynamoDB in production architecture)
 LEADS = []
 
+# DPDP-style consent registry for Humsafar (household) mode. Household data is
+# shared only while BOTH partners hold an active grant; every grant/revoke is
+# audit-logged. Priya's grant is seeded as if given from her own device.
+CONSENTS = {"C002": {"granted_to": "C001", "on": str(TODAY - timedelta(days=12))}}
+CONSENT_LOG = [{"ts": f"{TODAY - timedelta(days=12)}T10:14:00", "actor": "C002",
+                "action": "GRANT", "to": "C001", "channel": "IDBI Mobile"}]
+
+
+def consent_status(cid):
+    c = get_customer(cid)
+    if not c or not c["partner_id"]:
+        return None
+    pid = c["partner_id"]
+    partner = get_customer(pid)
+    mine = CONSENTS.get(cid)
+    theirs = CONSENTS.get(pid)
+    return {
+        "customer_id": cid, "partner_id": pid, "partner_name": partner["name"],
+        "self_granted": bool(mine and mine["granted_to"] == pid),
+        "partner_granted": bool(theirs and theirs["granted_to"] == cid),
+        "active": bool(mine and mine["granted_to"] == pid and theirs and theirs["granted_to"] == cid),
+        "self_granted_on": mine["on"] if mine else None,
+        "partner_granted_on": theirs["on"] if theirs else None,
+        "shared_scope": ["Account balances & FDs", "Mutual fund holdings & SIPs",
+                          "Loans & EMIs", "Goals", "Categorized spending summary"],
+        "audit_log": [e for e in CONSENT_LOG if e["actor"] in (cid, pid)],
+    }
+
+
+def set_consent(cid, grant: bool):
+    from datetime import datetime
+    c = get_customer(cid)
+    if not c or not c["partner_id"]:
+        return None
+    if grant:
+        CONSENTS[cid] = {"granted_to": c["partner_id"], "on": str(TODAY)}
+    else:
+        CONSENTS.pop(cid, None)
+    CONSENT_LOG.append({"ts": datetime.now().isoformat(timespec="seconds"), "actor": cid,
+                        "action": "GRANT" if grant else "REVOKE",
+                        "to": c["partner_id"], "channel": "IDBI Mobile"})
+    return consent_status(cid)
+
+
+def consent_active(cid):
+    s = consent_status(cid)
+    return bool(s and s["active"])
+
 
 def get_customer(cid):
     return CUSTOMERS.get(cid)
@@ -258,6 +306,8 @@ def portfolio_summary(cid):
 def household_summary(cid):
     c = get_customer(cid)
     if not c or not c["partner_id"]:
+        return None
+    if not consent_active(cid):  # DPDP: no consent pair, no shared view — enforced here, not in the UI
         return None
     p1, p2 = portfolio_summary(cid), portfolio_summary(c["partner_id"])
     alloc = {k: p1["allocation"][k] + p2["allocation"][k] for k in p1["allocation"]}
@@ -325,7 +375,7 @@ def plan_goal(cid, goal_name, household=False):
         "remaining": remaining, "deadline": goal["by"], "months_left": months_left,
         "required_monthly_saving": required_monthly,
     }
-    if household and goal.get("joint") and c["partner_id"]:
+    if household and goal.get("joint") and c["partner_id"] and consent_active(cid):
         p = get_customer(c["partner_id"])
         total = c["monthly_income"] + p["monthly_income"]
         out["fair_split_options"] = {
@@ -340,6 +390,62 @@ def plan_goal(cid, goal_name, household=False):
             },
         }
     return out
+
+
+# Synthetic market snapshot (round-1 scope; NSE/AMFI feeds in production).
+# Seeded off today's date so the "day's move" changes across demo days.
+def _market_today():
+    rng = random.Random(str(TODAY))
+    nifty_1d = round(rng.uniform(-1.4, 1.6), 2)
+    indices = [
+        {"name": "NIFTY 50", "level": round(24850 * (1 + nifty_1d / 100)), "chg_1d_pct": nifty_1d, "chg_1y_pct": 11.8},
+        {"name": "SENSEX", "level": round(81400 * (1 + nifty_1d / 100)), "chg_1d_pct": round(nifty_1d * 0.97, 2), "chg_1y_pct": 11.2},
+        {"name": "NIFTY Midcap 150", "level": 21930, "chg_1d_pct": round(nifty_1d * 1.6 + rng.uniform(-0.2, 0.2), 2), "chg_1y_pct": 18.4},
+        {"name": "10Y G-Sec yield", "level": 6.82, "chg_1d_pct": round(rng.uniform(-0.4, 0.4), 2), "chg_1y_pct": -3.1},
+        {"name": "Gold (₹/10g)", "level": 74350, "chg_1d_pct": round(rng.uniform(-0.6, 0.8), 2), "chg_1y_pct": 16.2},
+    ]
+    # Map each MF scheme's day move to its asset class
+    mid = indices[2]["chg_1d_pct"]
+    class_moves = {
+        "Equity - Large Cap": nifty_1d, "Equity - Flexi Cap": round((nifty_1d + mid) / 2, 2),
+        "Equity - Mid Cap": mid, "Equity - ELSS": round(nifty_1d * 1.1, 2),
+        "Hybrid - Dynamic": round(nifty_1d * 0.6, 2),
+        "Debt - Corporate Bond": 0.03, "Debt - Liquid": 0.02,
+    }
+    return indices, class_moves
+
+
+def market_pulse(cid=None):
+    """Day's market snapshot, plus the customer's portfolio impact if cid given."""
+    indices, class_moves = _market_today()
+    out = {"as_of": str(TODAY), "indices": indices,
+           "headline": _market_headline(indices)}
+    if cid and get_customer(cid):
+        c = get_customer(cid)
+        impact, total_val = [], 0
+        day_pnl = 0.0
+        for h in c["holdings"]:
+            move = class_moves.get(h["asset_class"], 0.0)
+            pnl = round(h["current"] * move / 100)
+            day_pnl += pnl
+            total_val += h["current"]
+            impact.append({"fund": h["name"], "asset_class": h["asset_class"],
+                            "day_change_pct": move, "day_change_inr": pnl})
+        out["portfolio_impact"] = {
+            "day_change_inr": round(day_pnl),
+            "day_change_pct": round(day_pnl / total_val * 100, 2) if total_val else 0,
+            "by_holding": impact,
+            "note": "Estimated from asset-class index moves; day moves don't change your goals — stay invested.",
+        }
+    return out
+
+
+def _market_headline(indices):
+    nifty = indices[0]
+    direction = "up" if nifty["chg_1d_pct"] >= 0 else "down"
+    mid = indices[2]
+    driver = "midcaps leading" if abs(mid["chg_1d_pct"]) > abs(nifty["chg_1d_pct"]) else "large-caps steady"
+    return f"NIFTY {direction} {abs(nifty['chg_1d_pct'])}% today, {driver}; gold {'+' if indices[4]['chg_1d_pct'] >= 0 else ''}{indices[4]['chg_1d_pct']}%"
 
 
 def sip_target(cid, target_amount, years, expected_return_pct=12.0):
@@ -369,7 +475,7 @@ def retirement_projection(cid, retirement_age=60, household=False):
     6% p.a., corpus need = 25x first-year retirement expenses (4% rule)."""
     members = [cid]
     c = get_customer(cid)
-    if household and c["partner_id"]:
+    if household and c["partner_id"] and consent_active(cid):
         members.append(c["partner_id"])
 
     years_left = max(1, retirement_age - max(get_customer(m)["age"] for m in members))

@@ -55,8 +55,31 @@ def portfolio(cid: str):
 def household(cid: str):
     h = data.household_summary(cid)
     if not h:
+        s = data.consent_status(cid)
+        if s and not s["active"]:
+            raise HTTPException(403, "consent required")
         raise HTTPException(404, "no linked partner")
     return h
+
+
+class ConsentRequest(BaseModel):
+    grant: bool
+
+
+@app.get("/api/consent/{cid}")
+def consent(cid: str):
+    s = data.consent_status(cid)
+    if not s:
+        raise HTTPException(404, "no linked partner")
+    return s
+
+
+@app.post("/api/consent/{cid}")
+def update_consent(cid: str, req: ConsentRequest):
+    s = data.set_consent(cid, req.grant)
+    if not s:
+        raise HTTPException(404, "no linked partner")
+    return s
 
 
 @app.get("/api/nudges/{cid}")
@@ -64,6 +87,13 @@ def nudges(cid: str):
     if not data.get_customer(cid):
         raise HTTPException(404, "customer not found")
     return agents.nudges(cid)
+
+
+@app.get("/api/market/{cid}")
+def market(cid: str):
+    if not data.get_customer(cid):
+        raise HTTPException(404, "customer not found")
+    return data.market_pulse(cid)
 
 
 @app.get("/api/health-score/{cid}")
@@ -85,6 +115,17 @@ def report(cid: str):
     if "error" in out:
         raise HTTPException(404, out["error"])
     return out
+
+
+@app.get("/api/metrics")
+def metrics():
+    """Live performance telemetry: latency, tokens, cost, tool usage, compliance."""
+    out = agents.metrics_summary()
+    out["voice_sessions"] = VOICE_SESSIONS["count"]
+    return out
+
+
+VOICE_SESSIONS = {"count": 0}
 
 
 @app.get("/api/leads")
@@ -168,6 +209,7 @@ async def voice_ws(ws: WebSocket, cid: str, household: bool = False):
         await ws.close(code=4404)
         return
     await ws.accept()
+    VOICE_SESSIONS["count"] += 1
     logger.info("Voice session started: %s (household=%s)", cid, household)
     events, queue = await voice.start_live_session(cid, household)
     leads_seen = {l["id"] for l in data.LEADS}

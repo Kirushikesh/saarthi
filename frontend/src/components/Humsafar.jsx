@@ -8,10 +8,19 @@ export default function Humsafar({ customer }) {
   const [report, setReport] = useState(null)
   const [reporting, setReporting] = useState(false)
 
+  const [consent, setConsentState] = useState(null)
+
   useEffect(() => {
     setH(null); setErr(null); setReport(null)
     api.household(customer.id).then(setH).catch((e) => setErr(e.message))
+    api.consent(customer.id).then(setConsentState).catch(() => {})
   }, [customer.id])
+
+  const revoke = async () => {
+    await api.setConsent(customer.id, false)
+    setH(null); setErr('consent required')
+    setConsentState(await api.consent(customer.id))
+  }
 
   const generateReport = async () => {
     setReporting(true)
@@ -28,9 +37,13 @@ export default function Humsafar({ customer }) {
   if (err) return (
     <div className="pad">
       <div className="card empty-state">
-        <div style={{ fontSize: 34 }}>👫</div>
-        <b>No linked partner yet</b>
-        <p className="muted">Humsafar mode unlocks when both partners link their IDBI accounts with mutual consent — unified net worth, joint goals and an impartial AI mediator for money decisions.</p>
+        <div style={{ fontSize: 34 }}>{err.includes('consent') ? '🔐' : '👫'}</div>
+        <b>{err.includes('consent') ? 'Mutual consent required' : 'No linked partner yet'}</b>
+        <p className="muted">
+          {err.includes('consent')
+            ? 'Household data stays private until both partners consent (DPDP-compliant, revocable anytime). Tap "Plan together" in the Advisor tab to give yours.'
+            : 'Humsafar mode unlocks when both partners link their IDBI accounts with mutual consent — unified net worth, joint goals and an impartial AI mediator for money decisions.'}
+        </p>
       </div>
     </div>
   )
@@ -108,6 +121,13 @@ export default function Humsafar({ customer }) {
           </div>
         )}
       </div>
+
+      {consent?.active && (
+        <div className="consent-banner">
+          🔐 Shared under mutual consent — you ({consent.self_granted_on}) · {consent.partner_name.split(' ')[0]} ({consent.partner_granted_on})
+          <button className="consent-revoke" onClick={revoke}>Revoke mine</button>
+        </div>
+      )}
     </div>
   )
 }

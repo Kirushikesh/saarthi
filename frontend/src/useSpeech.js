@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-
-const LANGS = { en: 'en-IN', hi: 'hi-IN' }
+import { bcp47 } from './i18n'
 
 export function useSpeech(lang) {
   const [listening, setListening] = useState(false)
@@ -12,7 +11,7 @@ export function useSpeech(lang) {
     if (!supported || listening) return
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     const rec = new SR()
-    rec.lang = LANGS[lang] || 'en-IN'
+    rec.lang = bcp47(lang)
     rec.interimResults = false
     rec.maxAlternatives = 1
     rec.onresult = (e) => onResult(e.results[0][0].transcript)
@@ -34,7 +33,7 @@ export function useSpeech(lang) {
     // strip markdown for natural speech
     const plain = text.replace(/[*#_`>|-]/g, ' ').replace(/\[(.*?)\]\(.*?\)/g, '$1').replace(/\s+/g, ' ').trim()
     const u = new SpeechSynthesisUtterance(plain.slice(0, 800))
-    const target = LANGS[lang] || 'en-IN'
+    const target = bcp47(lang)
     const voices = window.speechSynthesis.getVoices()
     u.voice = voices.find((v) => v.lang === target) || voices.find((v) => v.lang.startsWith(target.slice(0, 2))) || null
     u.lang = target

@@ -5,21 +5,7 @@ import { useSpeech } from '../useSpeech'
 import { useVoiceSession } from '../useVoiceSession'
 import Avatar from './Avatar'
 
-const GREET = {
-  en: (name) => `Namaste ${name.split(' ')[0]}! I'm **Saarthi**, your personal wealth companion. Ask me about your portfolio, goals, or whether you can afford that next big step.`,
-  hi: (name) => `नमस्ते ${name.split(' ')[0]}! मैं **सारथी** हूँ, आपका व्यक्तिगत वेल्थ साथी। अपने निवेश, लक्ष्य या किसी बड़े खर्च की योजना के बारे में पूछिए।`,
-}
-
-const SUGGESTIONS = {
-  individual: {
-    en: ['How are my investments doing?', 'Am I on track for retirement?', 'How much more tax can I save this year?', 'Can I afford a ₹50 lakh home loan for 20 years?', 'I want to buy term insurance'],
-    hi: ['मेरे निवेश कैसे चल रहे हैं?', 'क्या मैं रिटायरमेंट के लिए तैयार हूँ?', 'क्या मैं 20 साल के लिए ₹50 लाख का होम लोन ले सकता हूँ?'],
-  },
-  household: {
-    en: ['Can WE afford a ₹80 lakh home loan together?', 'How should we split savings for our home goal?', 'Are we on track to retire at 60?', 'Show our combined net worth'],
-    hi: ['क्या हम मिलकर ₹80 लाख का होम लोन ले सकते हैं?', 'घर के लक्ष्य के लिए बचत कैसे बाँटें?'],
-  },
-}
+import { GREET, SUGGESTIONS, UI, t } from '../i18n'
 
 export default function Chat({ customer, householdMode, lang, voiceOn, onLead }) {
   const [messages, setMessages] = useState([])
@@ -54,7 +40,7 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
   }
 
   useEffect(() => {
-    setMessages([{ role: 'assistant', content: GREET[lang](customer.name) }])
+    setMessages([{ role: 'assistant', content: (GREET[lang] || GREET.en)(customer.name.split(' ')[0]) }])
   }, [customer.id, householdMode, lang]) // eslint-disable-line
 
   useEffect(() => {
@@ -87,7 +73,7 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
     : voice.thinking || busy ? 'thinking'
     : voice.live || speech.listening ? 'listening'
     : 'idle'
-  const sugg = SUGGESTIONS[householdMode ? 'household' : 'individual'][lang] || []
+  const sugg = t(SUGGESTIONS[householdMode ? 'household' : 'individual'], lang)
 
   return (
     <div className="chat">
@@ -153,7 +139,7 @@ export default function Chat({ customer, householdMode, lang, voiceOn, onLead })
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder={lang === 'hi' ? 'अपना सवाल पूछें…' : 'Ask about your money…'}
+          placeholder={t(UI.placeholder, lang)}
         />
         <button className="send" onClick={() => send()} disabled={busy || !input.trim()}>➤</button>
       </div>

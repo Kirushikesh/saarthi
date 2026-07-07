@@ -8,7 +8,9 @@ Saarthi is an avatar-based, multilingual AI wealth advisor designed to embed ins
 
 | Capability | What it does |
 |---|---|
-| 🎙️ Realtime voice avatar | Live spoken conversation (Google ADK + Gemini Live, barge-in supported) in English & Hindi, with animated avatar and live captions |
+| 🎙️ Realtime voice avatar | Live spoken conversation (Google ADK + Gemini Live, barge-in supported) with an expressive animated advisor — blinks, lip-sync, thinking/listening states |
+| 🌏 7 languages | English, Hindi, Tamil, Telugu, Kannada, Bengali, Marathi — localized UI, agent replies in the customer's language & script, voice follows |
+| 📈 Market pulse | Daily index snapshot translated into personal impact: "Your funds today: +₹2,508" — with a stay-invested nudge |
 | 📊 360° portfolio | Savings, FDs, MFs, NPS, EPF, categorized spends, goals — one dashboard |
 | 🎯 Suitability engine | Age, risk-profile and segment-aware recommendations, down to specific IDBI MF schemes |
 | 🧮 Scenario simulation | "Can I afford a ₹50L home loan?" → EMI, FOIR, surplus math with a clear verdict |
@@ -18,6 +20,8 @@ Saarthi is an avatar-based, multilingual AI wealth advisor designed to embed ins
 | ❤️ Financial Health Score | 0–100 score across four pillars (emergency buffer, diversification, debt headroom, goal funding) — gauge on the dashboard, tool for the agent |
 | 🛡️ Compliance & Suitability Gate | Vanilla products (FD/RD/MF/PPF/NPS) advised directly; regulated products (insurance, ULIP, PMS, AIF) auto-route to a human RM as a **qualified lead** — the SEBI/IRDAI-compliant hybrid model IDBI asked for |
 | 👫 Humsafar mode | Linked partners get combined analysis, joint goal planning and a data-driven mediator |
+| 🔐 Consent-first data sharing | Household mode activates only on **mutual, revocable, audit-logged consent** (DPDP-aligned); enforced in the data layer, not the UI |
+| 📏 Live telemetry | `GET /api/metrics`: latency, tokens, ₹ cost per chat, tool-grounding rate, gate→lead conversion — see [docs/performance-report.md](docs/performance-report.md) |
 | 📜 State of our Union | One-tap monthly household report: headline, cash flow, both partners' health scores, joint goals with fair splits, retirement check and three actions — deterministic numbers, AI narration |
 | 🔔 Proactive nudges | Allocation gaps, idle surplus, thin emergency funds, off-track goals, unclaimed tax savings |
 

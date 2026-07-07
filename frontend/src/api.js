@@ -12,6 +12,17 @@ export const api = {
   household: (id) => get(`/api/household/${id}`),
   nudges: (id) => get(`/api/nudges/${id}`),
   healthScore: (id) => get(`/api/health-score/${id}`),
+  market: (id) => get(`/api/market/${id}`),
+  consent: (id) => get(`/api/consent/${id}`),
+  setConsent: async (id, grant) => {
+    const r = await fetch(`${BASE}/api/consent/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grant }),
+    })
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
+    return r.json()
+  },
   report: (id) => get(`/api/report/${id}`),
   leads: () => get('/api/leads'),
   chat: async (body) => {

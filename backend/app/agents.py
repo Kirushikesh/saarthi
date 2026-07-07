@@ -14,6 +14,7 @@ Architecture:
 import json
 import os
 import re
+import time
 from contextvars import ContextVar
 from typing import Callable
 
@@ -31,6 +32,12 @@ MODEL = _raw_model if ":" in _raw_model else f"openai:{_raw_model}"
 # Per-request event log (tool calls, gate triggers) — contextvar so concurrent
 # requests don't interleave.
 _events: ContextVar[list] = ContextVar("saarthi_events")
+
+# Per-turn telemetry for the performance report (in-memory, prototype scope).
+METRICS: list[dict] = []
+# gpt-4o-mini pricing, USD per 1M tokens
+_PRICE_IN, _PRICE_OUT = 0.15, 0.60
+_USD_INR = 84.0
 
 
 # ---------------------------------------------------------------- compliance
@@ -68,7 +75,9 @@ class ComplianceGateMiddleware(AgentMiddleware):
         )
         if last_user and REGULATED_PATTERNS.search(str(last_user.content)):
             try:
-                _events.get().append({"tool": "compliance_gate", "args": {"status": "TRIGGERED"}})
+                evs = _events.get()
+                if not any(e["tool"] == "compliance_gate" for e in evs):
+                    evs.append({"tool": "compliance_gate", "args": {"status": "TRIGGERED"}})
             except LookupError:
                 pass
             new_system = SystemMessage(
@@ -143,6 +152,15 @@ def _build_tools(cid: str, household_mode: bool):
         return data.tax_summary(cid)
 
     @tool
+    def get_market_pulse() -> dict:
+        """Today's market snapshot (NIFTY, SENSEX, midcaps, G-Sec yield, gold)
+        AND its estimated impact on this customer's own holdings. Use for any
+        'how are markets', 'why did my portfolio move', or market-linked
+        product update question. Remind the customer that daily moves don't
+        change long-term goals."""
+        return data.market_pulse(cid)
+
+    @tool
     def get_financial_health() -> dict:
         """Financial Health Score (0-100) with four scored pillars: emergency
         buffer, diversification, debt headroom and goal funding. Use when the
@@ -167,7 +185,8 @@ def _build_tools(cid: str, household_mode: bool):
 
     return [get_portfolio, get_household_view, simulate_loan_affordability,
             plan_goal, plan_sip_target, project_retirement, get_tax_summary,
-            get_financial_health, get_product_catalog, create_rm_lead]
+            get_market_pulse, get_financial_health, get_product_catalog,
+            create_rm_lead]
 
 
 # ---------------------------------------------------------------- prompt
@@ -178,7 +197,7 @@ SYSTEM_TEMPLATE = """You are Saarthi, IDBI Bank's avatar-based AI wealth compani
 {household_note}
 
 ## Language
-Reply in the language the customer writes/speaks in. If they write in Hindi (Devanagari or romanized), reply in Hindi. Default: English with Indian conventions (lakh/crore, ₹).
+ALWAYS reply in the language the customer writes/speaks in — Hindi, Tamil, Telugu, Kannada, Bengali, Marathi, or any other Indian language, in its native script (romanized input still gets native-script replies). Keep ₹ amounts and Indian conventions (lakh/crore) in every language. Default: English.
 
 ## Advisory rules
 1. You MAY directly analyse, educate and recommend VANILLA products: FDs, RDs, mutual fund SIPs (suitability-based, at asset-class AND specific IDBI scheme level from the catalog), PPF, NPS, SSY, budgeting and goal planning.
@@ -246,11 +265,13 @@ def chat(cid, message, history, household_mode=False):
 
     token = _events.set([])
     leads_before = len(data.LEADS)
+    t0 = time.perf_counter()
     try:
         result = agent.invoke({"messages": messages})
         events = _events.get()
     finally:
         _events.reset(token)
+    latency_ms = round((time.perf_counter() - t0) * 1000)
 
     for m in result["messages"]:
         if isinstance(m, AIMessage) and m.tool_calls:
@@ -277,7 +298,55 @@ def chat(cid, message, history, household_mode=False):
             "certified IDBI Relationship Manager to call you within 24 hours "
             "to guide you personally."
         )
+
+    in_tok = out_tok = 0
+    for m in result["messages"]:
+        usage = getattr(m, "usage_metadata", None)
+        if usage:
+            in_tok += usage.get("input_tokens", 0)
+            out_tok += usage.get("output_tokens", 0)
+    cost_usd = (in_tok * _PRICE_IN + out_tok * _PRICE_OUT) / 1e6
+    METRICS.append({
+        "ts": time.time(), "customer_id": cid, "latency_ms": latency_ms,
+        "input_tokens": in_tok, "output_tokens": out_tok,
+        "cost_usd": round(cost_usd, 6), "cost_inr": round(cost_usd * _USD_INR, 4),
+        "llm_calls": sum(1 for m in result["messages"] if isinstance(m, AIMessage)),
+        "tools_used": [e["tool"] for e in events if e["tool"] != "compliance_gate"],
+        "gate_fired": gate_fired, "lead_created": lead is not None,
+        "household": household_mode,
+    })
     return {"reply": reply, "events": events, "lead": lead}
+
+
+def metrics_summary():
+    """Aggregates for the performance report — computed from real turns."""
+    if not METRICS:
+        return {"chats": 0}
+    lat = sorted(m["latency_ms"] for m in METRICS)
+    n = len(lat)
+    tool_counts: dict[str, int] = {}
+    for m in METRICS:
+        for t_ in m["tools_used"]:
+            tool_counts[t_] = tool_counts.get(t_, 0) + 1
+    total_cost_usd = sum(m["cost_usd"] for m in METRICS)
+    return {
+        "chats": n,
+        "latency_ms": {"avg": round(sum(lat) / n), "p50": lat[n // 2],
+                        "p95": lat[min(n - 1, int(n * 0.95))], "max": lat[-1]},
+        "tokens_per_chat": {"input": round(sum(m["input_tokens"] for m in METRICS) / n),
+                             "output": round(sum(m["output_tokens"] for m in METRICS) / n)},
+        "cost_per_chat": {"usd": round(total_cost_usd / n, 5),
+                           "inr": round(total_cost_usd * _USD_INR / n, 3)},
+        "projected_cost_inr_per_1000_chats": round(total_cost_usd * _USD_INR / n * 1000),
+        "tool_call_rate_pct": round(sum(1 for m in METRICS if m["tools_used"]) / n * 100),
+        "tool_usage": dict(sorted(tool_counts.items(), key=lambda kv: -kv[1])),
+        "compliance_gate_triggers": sum(1 for m in METRICS if m["gate_fired"]),
+        "rm_leads_created": sum(1 for m in METRICS if m["lead_created"]),
+        "gate_to_lead_conversion_pct": (
+            round(sum(1 for m in METRICS if m["gate_fired"] and m["lead_created"])
+                  / max(1, sum(1 for m in METRICS if m["gate_fired"])) * 100)),
+        "model": MODEL,
+    }
 
 
 def nudges(cid):
@@ -285,6 +354,13 @@ def nudges(cid):
     p = data.portfolio_summary(cid)
     c = data.get_customer(cid)
     out = []
+    mp = data.market_pulse(cid)
+    pi = mp.get("portfolio_impact")
+    if pi and abs(pi["day_change_pct"]) >= 0.3:
+        up = pi["day_change_inr"] >= 0
+        out.append({"icon": "📈" if up else "📉",
+                    "title": f"Markets today: your funds {'+' if up else '−'}₹{abs(pi['day_change_inr']):,}",
+                    "body": f"{mp['headline']}. That's {pi['day_change_pct']:+}% on your MF holdings — daily moves don't change your goals, your SIPs buy {'fewer' if up else 'more'} units."})
     eq = sum(h["current"] for h in p["holdings"] if "Equity" in h["asset_class"] or "Hybrid" in h["asset_class"])
     eq_pct = round(eq / p["total_assets"] * 100) if p["total_assets"] else 0
     ideal = max(20, min(70, 100 - c["age"]))

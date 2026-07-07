@@ -4,6 +4,32 @@ import { api, inr } from '../api'
 
 const COLORS = ['#0d9488', '#f59e0b', '#0369a1', '#7c3aed', '#e11d48']
 
+function MarketPulse({ market }) {
+  const pi = market.portfolio_impact
+  const up = pi && pi.day_change_inr >= 0
+  return (
+    <div className="card">
+      <div className="card-title">Market Pulse <span className="pill">{market.as_of}</span></div>
+      <div className="ticker-row">
+        {market.indices.map((ix) => (
+          <div key={ix.name} className="ticker">
+            <div className="ticker-name">{ix.name}</div>
+            <div className={`ticker-chg ${ix.chg_1d_pct >= 0 ? 'gain' : 'loss'}`}>
+              {ix.chg_1d_pct >= 0 ? '▲' : '▼'} {Math.abs(ix.chg_1d_pct)}%
+            </div>
+          </div>
+        ))}
+      </div>
+      {pi && (
+        <div className={`impact-strip ${up ? 'up' : 'down'}`}>
+          <b>Your funds today: {up ? '+' : '−'}{inr(Math.abs(pi.day_change_inr))} ({pi.day_change_pct >= 0 ? '+' : ''}{pi.day_change_pct}%)</b>
+          <span>{pi.note}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function HealthGauge({ health }) {
   const R = 52, C = Math.PI * R // semicircle circumference
   const color = health.score >= 80 ? '#16a34a' : health.score >= 60 ? '#0d9488' : health.score >= 40 ? '#f59e0b' : '#e11d48'
@@ -35,12 +61,13 @@ export default function Dashboard({ customer }) {
   const [p, setP] = useState(null)
   const [nudges, setNudges] = useState([])
   const [health, setHealth] = useState(null)
+  const [market, setMarket] = useState(null)
   const [err, setErr] = useState(null)
 
   useEffect(() => {
     setP(null)
-    Promise.all([api.portfolio(customer.id), api.nudges(customer.id), api.healthScore(customer.id)])
-      .then(([pf, nd, hs]) => { setP(pf); setNudges(nd); setHealth(hs) })
+    Promise.all([api.portfolio(customer.id), api.nudges(customer.id), api.healthScore(customer.id), api.market(customer.id)])
+      .then(([pf, nd, hs, mk]) => { setP(pf); setNudges(nd); setHealth(hs); setMarket(mk) })
       .catch((e) => setErr(e.message))
   }, [customer.id])
 
@@ -60,6 +87,8 @@ export default function Dashboard({ customer }) {
           Assets {inr(p.total_assets)} · Liabilities {inr(p.total_liabilities)} · SIP {inr(p.monthly_sip)}/mo
         </div>
       </div>
+
+      {market && <MarketPulse market={market} />}
 
       {health && <HealthGauge health={health} />}
 
