@@ -12,11 +12,16 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from . import agents, data, voice
+from . import agents, data, heartbeat, suitability, voice
 
 logger = logging.getLogger("saarthi.api")
 
 app = FastAPI(title="Saarthi API", version="0.1.0")
+
+
+@app.on_event("startup")
+async def _start_heartbeat():
+    asyncio.create_task(heartbeat.run())
 
 app.add_middleware(
     CORSMiddleware,
@@ -96,6 +101,24 @@ def market(cid: str):
     return data.market_pulse(cid)
 
 
+@app.get("/api/behavior/{cid}")
+def behavior(cid: str):
+    """Behavioural profile derived from raw transactions (no pre-labels)."""
+    b = data.behavior_summary(cid)
+    if not b:
+        raise HTTPException(404, "customer not found")
+    return b
+
+
+@app.get("/api/suitability/{cid}")
+def suitability_audit(cid: str):
+    """Advice audit trail: every suitability assessment recorded for this
+    customer — the SEBI-style 'why was this recommended' record."""
+    if not data.get_customer(cid):
+        raise HTTPException(404, "customer not found")
+    return {"audit_trail": suitability.audit_trail(cid)}
+
+
 @app.get("/api/health-score/{cid}")
 def health_score(cid: str):
     if not data.get_customer(cid):
@@ -122,15 +145,65 @@ def metrics():
     """Live performance telemetry: latency, tokens, cost, tool usage, compliance."""
     out = agents.metrics_summary()
     out["voice_sessions"] = VOICE_SESSIONS["count"]
+    out["heartbeat"] = {"beats": heartbeat.BEATS["count"],
+                        "notifications_pushed": heartbeat.BEATS["pushed"],
+                        "interval_seconds": heartbeat.INTERVAL_SECONDS}
     return out
 
 
 VOICE_SESSIONS = {"count": 0}
 
 
+@app.get("/api/notifications/{cid}")
+def notifications(cid: str):
+    """Customer's proactive-heartbeat notification feed."""
+    if not data.get_customer(cid):
+        raise HTTPException(404, "customer not found")
+    return data.list_notifications(cid)
+
+
+@app.post("/api/notifications/{cid}/read")
+def read_notifications(cid: str):
+    if not data.get_customer(cid):
+        raise HTTPException(404, "customer not found")
+    return data.mark_notifications_read(cid)
+
+
 @app.get("/api/leads")
 def leads():
     return list(reversed(data.LEADS))
+
+
+@app.get("/api/leads/{lead_id}/brief")
+def lead_brief(lead_id: str):
+    """RM copilot: pre-meeting brief + drafted customer message for a lead."""
+    if not data.get_lead(lead_id):
+        raise HTTPException(404, "lead not found")
+    try:
+        return agents.lead_brief(lead_id)
+    except Exception as e:
+        raise HTTPException(502, f"Brief generation failed: {e}")
+
+
+class ApproveRequest(BaseModel):
+    message: str
+
+
+@app.post("/api/leads/{lead_id}/approve")
+def approve_lead(lead_id: str, req: ApproveRequest):
+    """RM approves the drafted message — 'adviser approves, AI produces'.
+    The message lands in the customer's notification feed."""
+    lead = data.get_lead(lead_id)
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    lead["status"] = "RM MESSAGE SENT"
+    lead["sent_message"] = req.message
+    data.add_notification(
+        lead["customer_id"], "📞",
+        f"Your RM is on your {lead['product']} enquiry",
+        req.message, source="rm",
+    )
+    return lead
 
 
 @app.post("/api/chat")

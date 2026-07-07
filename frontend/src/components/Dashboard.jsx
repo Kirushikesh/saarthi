@@ -57,11 +57,49 @@ function HealthGauge({ health }) {
   )
 }
 
+function BehaviorCard({ behavior }) {
+  return (
+    <div className="card">
+      <div className="card-title">Behavioural Profile <span className="pill">{behavior.behavioral_segment}</span></div>
+      {behavior.signals.map((s) => (
+        <div key={s} className="behavior-signal">• {s}</div>
+      ))}
+      <div className="derived-note">
+        Derived from {behavior.derived_from} · classifier coverage {behavior.classifier_coverage.coverage_pct}%
+      </div>
+    </div>
+  )
+}
+
+function AuditTrailCard({ trail }) {
+  return (
+    <div className="card">
+      <div className="card-title">📜 Advice Audit Trail <span className="pill">SEBI-style record</span></div>
+      <p className="muted small">Every product Saarthi assesses for you is scored by a deterministic suitability engine and logged — the "why" behind each recommendation.</p>
+      {trail.length === 0 && (
+        <div className="empty-state small">No assessments yet — ask Saarthi to recommend an investment.</div>
+      )}
+      {trail.slice(0, 6).map((e, i) => (
+        <div key={i} className="audit-row">
+          <div className="audit-head">
+            <b>{e.product}</b>
+            <span className={`pill verdict-${e.verdict.toLowerCase()}`}>{e.verdict.replaceAll('_', ' ')}</span>
+          </div>
+          <div className="audit-reasons">{e.reasons.slice(0, 2).join(' · ')}</div>
+          <div className="audit-meta">{e.ts.replace('T', ' ')} · via {e.via === 'agent_tool' ? 'Saarthi advisory' : 'API'}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function Dashboard({ customer }) {
   const [p, setP] = useState(null)
   const [nudges, setNudges] = useState([])
   const [health, setHealth] = useState(null)
   const [market, setMarket] = useState(null)
+  const [behavior, setBehavior] = useState(null)
+  const [trail, setTrail] = useState(null)
   const [err, setErr] = useState(null)
 
   useEffect(() => {
@@ -69,6 +107,8 @@ export default function Dashboard({ customer }) {
     Promise.all([api.portfolio(customer.id), api.nudges(customer.id), api.healthScore(customer.id), api.market(customer.id)])
       .then(([pf, nd, hs, mk]) => { setP(pf); setNudges(nd); setHealth(hs); setMarket(mk) })
       .catch((e) => setErr(e.message))
+    api.behavior(customer.id).then(setBehavior).catch(() => {})
+    api.suitability(customer.id).then((s) => setTrail(s.audit_trail)).catch(() => {})
   }, [customer.id])
 
   if (err) return <div className="pad error">⚠️ {err}</div>
@@ -91,6 +131,8 @@ export default function Dashboard({ customer }) {
       {market && <MarketPulse market={market} />}
 
       {health && <HealthGauge health={health} />}
+
+      {behavior && <BehaviorCard behavior={behavior} />}
 
       <div className="card">
         <div className="card-title">Asset Allocation</div>
@@ -158,6 +200,8 @@ export default function Dashboard({ customer }) {
           )
         })}
       </div>
+
+      {trail && <AuditTrailCard trail={trail} />}
 
       {nudges.length > 0 && (
         <div className="card">

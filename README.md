@@ -12,18 +12,20 @@ Saarthi is an avatar-based, multilingual AI wealth advisor designed to embed ins
 | 🌏 7 languages | English, Hindi, Tamil, Telugu, Kannada, Bengali, Marathi — localized UI, agent replies in the customer's language & script, voice follows |
 | 📈 Market pulse | Daily index snapshot translated into personal impact: "Your funds today: +₹2,508" — with a stay-invested nudge |
 | 📊 360° portfolio | Savings, FDs, MFs, NPS, EPF, categorized spends, goals — one dashboard |
-| 🎯 Suitability engine | Age, risk-profile and segment-aware recommendations, down to specific IDBI MF schemes |
+| 🎯 Suitability engine | Deterministic product scoring (risk band, horizon, surplus, emergency buffer, behaviour signals) with per-recommendation reasons — every assessment written to a SEBI-style **advice audit trail** (`GET /api/suitability/{cid}`) |
+| 🧠 Behavioural analytics | Spend categories and behaviour signals (income stability, savings rate, SIP discipline, discretionary share, behavioural segment) **derived from raw transaction narrations** — no pre-labeled data — feeding suitability and advice |
 | 🧮 Scenario simulation | "Can I afford a ₹50L home loan?" → EMI, FOIR, surplus math with a clear verdict |
 | 🧭 Retirement readiness | Projected corpus vs inflation-adjusted need (4% rule) and the exact extra monthly SIP to close the gap — individually or as a couple |
 | 🧾 Tax-saving lens | 80C / 80CCD(1B) utilization computed from actual ELSS SIPs and payroll, with rupee headroom and suggested actions |
 | 📈 Target-SIP planner | "How much monthly to reach ₹50L in 10 years?" → inverse SIP math, checked against the customer's real surplus |
 | ❤️ Financial Health Score | 0–100 score across four pillars (emergency buffer, diversification, debt headroom, goal funding) — gauge on the dashboard, tool for the agent |
-| 🛡️ Compliance & Suitability Gate | Vanilla products (FD/RD/MF/PPF/NPS) advised directly; regulated products (insurance, ULIP, PMS, AIF) auto-route to a human RM as a **qualified lead** — the SEBI/IRDAI-compliant hybrid model IDBI asked for |
+| 🛡️ Compliance & Suitability Gate | Regulated intents detected in **all 7 languages** (native-script + romanized keyword fast-path, LLM intent-classifier backstop for paraphrases) and auto-routed to a human RM as a **qualified lead** — benchmarked at 100% catch / 0% false positives across a 22-attack battery |
 | 👫 Humsafar mode | Linked partners get combined analysis, joint goal planning and a data-driven mediator |
 | 🔐 Consent-first data sharing | Household mode activates only on **mutual, revocable, audit-logged consent** (DPDP-aligned); enforced in the data layer, not the UI |
-| 📏 Live telemetry | `GET /api/metrics`: latency, tokens, ₹ cost per chat, tool-grounding rate, gate→lead conversion — see [docs/performance-report.md](docs/performance-report.md) |
+| 📏 Evaluation & telemetry | Scripted **86-query benchmark** across 7 languages with a programmatic pass/fail rubric (`scripts/benchmark.py`) + live telemetry at `GET /api/metrics` — see [docs/performance-report.md](docs/performance-report.md) |
 | 📜 State of our Union | One-tap monthly household report: headline, cash flow, both partners' health scores, joint goals with fair splits, retirement check and three actions — deterministic numbers, AI narration |
-| 🔔 Proactive nudges | Allocation gaps, idle surplus, thin emergency funds, off-track goals, unclaimed tax savings |
+| 🫀 Proactive heartbeat | A background pulse (LLM-free, deterministic) rescans every customer's portfolio against today's market and **reaches out first** — 🔔 notifications arrive unprompted: market impact on your funds, allocation gaps, idle surplus, thin emergency buffers, off-track goals, unclaimed tax savings |
+| 📋 RM copilot | For every gated lead, Saarthi preps the RM with an AI pre-meeting brief (profile, ₹ snapshot, suitability signals, talking points) and a drafted customer reply — the **RM approves, the AI produces**; approved messages land in the customer's notification feed |
 
 ## Architecture
 
@@ -37,10 +39,18 @@ FastAPI ──────────────────► ADK live sessi
 LangChain create_agent  ◄───────────┘   ← one brain for both channels
    ├── @tools: portfolio · household view · loan simulation (EMI/FOIR)
    │           goal planner · target-SIP · retirement projection · tax lens
-   │           financial health score · product catalog · RM lead
-   ├── ComplianceGateMiddleware (wrap_model_call): regulated intents get a
-   │   hard handoff directive + deterministic lead-creation fallback
-   └── Synthetic bank data (round-1 scope) + RM lead queue
+   │           financial health score · suitability check (audited) ·
+   │           behavioural profile · product catalog · RM lead
+   ├── ComplianceGateMiddleware (wrap_model_call): multilingual pattern
+   │   fast-path + LLM intent backstop → hard handoff directive +
+   │   deterministic lead-creation fallback
+   ├── Suitability engine (suitability.py): deterministic scoring with
+   │   reasons; every assessment → advice audit trail
+   ├── Behavioural analytics (analytics.py): raw narrations → categories +
+   │   behaviour signals (income stability, SIP discipline, …)
+   ├── Proactive heartbeat (background task): rescans portfolios vs today's
+   │   market on a pulse, pushes notifications — no LLM, pure data math
+   └── Synthetic bank data (round-1 scope) + RM lead queue + notification feed
 ```
 
 - **Brain**: LangChain `create_agent` (v1) — model set by `LLM_MODEL` (OpenAI in the prototype; provider-agnostic via `init_chat_model` strings, so the same agent runs on **Amazon Bedrock** models inside IDBI's AWS landing zone in production).
@@ -64,6 +74,21 @@ npm install
 npm run dev        # http://localhost:5173 (proxies /api and /ws to :8000)
 ```
 
+## Tests & benchmark
+
+```bash
+cd backend
+uv run --with pytest pytest tests/       # 30 LLM-free tests: gate patterns,
+                                         # classifier, suitability, loan math
+uv run python scripts/benchmark.py       # 86-query scripted eval (7 languages,
+                                         # 22 gate attacks) against :8000
+```
+
+Latest results: 100% gate catch, 0% false positives, 100% language fidelity,
+100% intent-tool match — [docs/performance-report.md](docs/performance-report.md).
+Bank-stack integration path (IDBI GO embed, auth, Account Aggregator, Bedrock/
+Nova Sonic): [docs/integration-architecture.md](docs/integration-architecture.md).
+
 ## Deploy
 
 - **Backend → Railway**: point a service at `backend/` (railway.toml included), set `OPENAI_API_KEY` and `GOOGLE_API_KEY`.
@@ -74,7 +99,9 @@ npm run dev        # http://localhost:5173 (proxies /api and /ws to :8000)
 1. Sign in as **Rohan** → avatar greets you; ask *"How are my investments doing?"*
 2. Switch language to **हिन्दी**, ask by voice — replies in Hindi, spoken aloud.
 3. Ask *"Can I afford a ₹50 lakh home loan for 20 years?"* → EMI/FOIR simulation; then *"Am I on track for retirement?"* → corpus projection + the exact extra SIP needed.
-4. Ask about **term insurance** → Compliance Gate declines direct advice, books an RM callback → watch it land in the **RM Console** tab.
+4. Ask about **term insurance** → Compliance Gate declines direct advice, books an RM callback → watch it land in the **RM Console** tab. Tap **✨ Prepare with Saarthi** → pre-meeting brief + drafted reply appear; hit **Approve & Send** → the message pops up in the customer's 🔔 feed.
+4a. **Try to break the gate**: ask *"मुझे टर्म इंश्योरेंस के बारे में बताओ"* in Hindi, or *"my uncle's agent suggested a money-back plan, should I take it?"* — both get caught (pattern fast-path and LLM backstop respectively) and routed to the RM. Then ask *"Recommend a mutual fund"* → the reply cites the suitability engine's reasons, and the assessment appears in the Portfolio tab's **Advice Audit Trail**.
+4b. While you talk, the **proactive heartbeat** fires — a 🔔 toast slides in unprompted ("Markets today: your funds +₹2,508").
 5. Tap **Plan together** (Humsafar mode) → *"Can WE afford an ₹80 lakh home loan?"* → joint assessment on combined income; *"How should we split savings for our home goal?"* → impartial mediator plan.
 6. In the **Humsafar** tab, tap **Generate this month's report** → the "State of our Union" household report writes itself.
 7. Show the **Portfolio** tab: Financial Health Score gauge, allocation, holdings, goals, Saarthi Insights nudges.

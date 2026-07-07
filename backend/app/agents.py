@@ -24,7 +24,7 @@ from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResp
 from langchain.tools import tool
 from langchain_core.messages import AIMessage, SystemMessage
 
-from . import data
+from . import data, suitability
 
 _raw_model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 MODEL = _raw_model if ":" in _raw_model else f"openai:{_raw_model}"
@@ -41,12 +41,83 @@ _USD_INR = 84.0
 
 
 # ---------------------------------------------------------------- compliance
+# Two-stage regulated-intent detector feeding ONE deterministic middleware:
+#   1. fast path — multilingual keyword patterns (native scripts + romanized),
+#      zero latency, zero cost;
+#   2. backstop — an LLM intent classifier for anything the patterns miss
+#      (paraphrase, code-mixing, "that LIC plan my uncle suggested").
+# The enforcement (directive injection + deterministic lead fallback) is
+# unchanged — only detection is upgraded.
 REGULATED_PATTERNS = re.compile(
-    r"insurance|ulip|term plan|health cover|mediclaim|pms|portfolio management"
+    # English
+    r"insurance|insur|ulip|term plan|health cover|mediclaim|\blic\b|pms|portfolio management"
     r"|aif|alternative investment|structured product|which stock|stock tip"
-    r"|share market tip|demat|derivative|f&o|futures|options trading",
+    r"|share market tip|demat|derivative|f&o|futures|options trading"
+    # Romanized Indian-language terms
+    r"|\bbima\b|\bbeema\b|\bvima\b|\bvimo\b|\bkappidu\b|\bkaappeedu\b|polic[iy]"
+    # Hindi / Marathi (Devanagari)
+    r"|बीमा|विमा|इंश्योरेंस|इन्शुरन्स|यूलिप|पॉलिसी|शेयर|स्टॉक|डीमैट"
+    # Tamil
+    r"|காப்பீடு|இன்சூரன்ஸ்|பங்கு|டீமேட்"
+    # Telugu
+    r"|బీమా|ఇన్సూరెన్స్|షేర్|స్టాక్|డీమ్యాట్"
+    # Kannada
+    r"|ವಿಮೆ|ಇನ್ಶೂರೆನ್ಸ್|ಷೇರು|ಸ್ಟಾಕ್"
+    # Bengali
+    r"|বিমা|বীমা|ইন্স্যুরেন্স|শেয়ার|স্টক",
     re.IGNORECASE,
 )
+
+GATE_CLASSIFIER_PROMPT = """You are the compliance intent detector for an Indian bank's AI wealth advisor.
+
+REGULATED (route to a certified human): the message seeks advice, comparison, purchase help or suitability on products the AI may not advise — insurance of ANY kind (term/life/health/ULIP/endowment/money-back plans), PMS, AIF, structured products, direct stocks/shares/demat/derivatives/F&O, or a specific insurer's plan (e.g. "LIC Jeevan Anand").
+
+VANILLA (the AI handles it): the customer's own portfolio and its performance, mutual funds/SIPs, FDs/RDs, PPF/NPS/SSY, budgeting, spending, goals, retirement planning, taxes, loans/EMIs, market levels and news, greetings — in ANY language.
+
+The message may be in any Indian language/script, romanized, or code-mixed. Judge the INTENT, not the language. When uncertain, answer VANILLA — a separate keyword layer already catches explicit regulated-product mentions.
+
+Examples:
+"என் முதலீடுகள் எப்படி போகின்றன?" → VANILLA (own investments)
+"मेरे लिए कौन सा म्यूचुअल फंड सही रहेगा?" → VANILLA (mutual funds are permitted)
+"I need something to cover hospital bills if I fall sick" → REGULATED (health insurance intent)
+"कौन सा शेयर खरीदूं?" → REGULATED (direct stocks)
+
+Reply with exactly one word: REGULATED or VANILLA.
+
+Message: {msg}"""
+
+_gate_model = None
+_gate_cache: dict[str, bool] = {}
+
+
+def _classify_regulated(text: str) -> bool:
+    """LLM backstop for the compliance gate. Cached per message (the
+    middleware wraps every model call in a multi-tool turn). Fails open —
+    the keyword fast-path and the deterministic lead fallback still stand."""
+    global _gate_model
+    key = text.strip().lower()[:300]
+    if key in _gate_cache:
+        return _gate_cache[key]
+    try:
+        if _gate_model is None:
+            _gate_model = init_chat_model(MODEL, temperature=0)
+        out = _gate_model.invoke(GATE_CLASSIFIER_PROMPT.format(msg=text[:600]))
+        flag = str(out.content).strip().upper().startswith("REGULATED")
+    except Exception:
+        flag = False
+    if len(_gate_cache) > 2000:
+        _gate_cache.clear()
+    _gate_cache[key] = flag
+    return flag
+
+
+def detect_regulated(text: str):
+    """Returns the detector that fired ('pattern' | 'llm') or None."""
+    if REGULATED_PATTERNS.search(text):
+        return "pattern"
+    if _classify_regulated(text):
+        return "llm"
+    return None
 
 GATE_DIRECTIVE = (
     "\n\n## COMPLIANCE GATE — TRIGGERED FOR THIS TURN (overrides everything else)\n"
@@ -73,11 +144,13 @@ class ComplianceGateMiddleware(AgentMiddleware):
         last_user = next(
             (m for m in reversed(request.messages) if m.type == "human"), None
         )
-        if last_user and REGULATED_PATTERNS.search(str(last_user.content)):
+        detector = detect_regulated(str(last_user.content)) if last_user else None
+        if detector:
             try:
                 evs = _events.get()
                 if not any(e["tool"] == "compliance_gate" for e in evs):
-                    evs.append({"tool": "compliance_gate", "args": {"status": "TRIGGERED"}})
+                    evs.append({"tool": "compliance_gate",
+                                "args": {"status": "TRIGGERED", "detector": detector}})
             except LookupError:
                 pass
             new_system = SystemMessage(
@@ -168,6 +241,26 @@ def _build_tools(cid: str, household_mode: bool):
         return data.financial_health(cid)
 
     @tool
+    def check_suitability(product_name: str = "") -> dict:
+        """MANDATORY before recommending ANY investment product. Deterministic
+        suitability engine: pass a product name to assess it, or leave empty
+        for the top-5 ranked products for this customer. Returns verdict
+        (SUITABLE / SUITABLE_WITH_CAUTION / NOT_SUITABLE) with explicit
+        reasons; every check is recorded in the bank's advice audit trail.
+        NEVER recommend against its verdict."""
+        return suitability.assess(cid, product_name or None)
+
+    @tool
+    def get_behavioral_profile() -> dict:
+        """Behavioural profile derived from the customer's raw bank
+        transactions (12 months, narration-classified): income stability,
+        savings rate, SIP discipline, discretionary spend ratio and a
+        behavioural segment. Use it to ground advice in observed behaviour
+        (variable income → liquidity caution, strong SIP discipline →
+        SIP-friendly, high discretionary share → budgeting angle)."""
+        return data.behavior_summary(cid)
+
+    @tool
     def get_product_catalog() -> dict:
         """IDBI product catalog: 'vanilla' products the AI may directly recommend
         (FD, RD, MF SIP, PPF, NPS, SSY) with current rates, available MF schemes,
@@ -181,12 +274,17 @@ def _build_tools(cid: str, household_mode: bool):
         Relationship Manager. MUST be used instead of giving direct advice for
         regulated products (insurance, ULIP, health cover, PMS, AIF, direct
         stocks) or when the customer asks for a human."""
-        return {"lead_created": data.create_lead(cid, product, context, household_mode)}
+        lead = data.create_lead(cid, product, context, household_mode)
+        try:  # attribute the lead to THIS request (concurrency-safe)
+            _events.get().append({"tool": "_lead_created", "args": lead})
+        except LookupError:
+            pass
+        return {"lead_created": lead}
 
     return [get_portfolio, get_household_view, simulate_loan_affordability,
             plan_goal, plan_sip_target, project_retirement, get_tax_summary,
-            get_market_pulse, get_financial_health, get_product_catalog,
-            create_rm_lead]
+            get_market_pulse, get_financial_health, check_suitability,
+            get_behavioral_profile, get_product_catalog, create_rm_lead]
 
 
 # ---------------------------------------------------------------- prompt
@@ -196,12 +294,17 @@ SYSTEM_TEMPLATE = """You are Saarthi, IDBI Bank's avatar-based AI wealth compani
 {profile}
 {household_note}
 
-## Language
-ALWAYS reply in the language the customer writes/speaks in — Hindi, Tamil, Telugu, Kannada, Bengali, Marathi, or any other Indian language, in its native script (romanized input still gets native-script replies). Keep ₹ amounts and Indian conventions (lakh/crore) in every language. Default: English.
+## Language (absolute rule)
+Detect the language of the customer's most recent message and write your ENTIRE reply in that language:
+- English message → English reply. Plain English is NOT romanized Hindi.
+- Native Indian script (Devanagari/Tamil/Telugu/Kannada/Bengali) → reply in that same language and script. A Kannada question gets a Kannada answer, a Telugu question a Telugu answer.
+- Indian language typed in Latin letters (e.g., "mujhe retirement ke liye kitna chahiye") → reply in that language's native script.
+Tool outputs arrive as English JSON — that NEVER changes your reply language; translate the findings. Product names and ₹ amounts stay as-is (lakh/crore conventions everywhere).
 
 ## Advisory rules
 1. You MAY directly analyse, educate and recommend VANILLA products: FDs, RDs, mutual fund SIPs (suitability-based, at asset-class AND specific IDBI scheme level from the catalog), PPF, NPS, SSY, budgeting and goal planning.
-2. Every recommendation must be SUITABILITY-BASED: consider age, risk profile, income, existing allocation, goals and time horizon. Briefly state why it suits them.
+2. Every recommendation must be SUITABILITY-BASED: ALWAYS call check_suitability before recommending any specific investment product. It returns a deterministic verdict with reasons and records the assessment in the bank's advice audit trail. Never recommend against its verdict; briefly relay its reasons to the customer.
+2b. Ground advice in OBSERVED behaviour, not just the profile form: use get_behavioral_profile for income stability, SIP discipline and spending patterns when relevant (e.g., variable income → larger emergency buffer before lock-ins).
 3. Regulated products (insurance, ULIP, PMS, AIF, direct stocks, complex tax structuring) are handled by certified human RMs — use create_rm_lead for those.
 4. Never fabricate holdings or numbers — always fetch via tools. Use ₹ and Indian number formatting (e.g., ₹12.5 lakh, ₹1.2 crore).
 5. Include a one-line disclaimer when recommending market-linked products: "Mutual fund investments are subject to market risks."
@@ -237,20 +340,18 @@ def _system_prompt(customer, household_mode):
 
 
 # ---------------------------------------------------------------- agents
-_agents = {}
-
-
 def get_agent(cid: str, household_mode: bool):
-    key = (cid, household_mode)
-    if key not in _agents:
-        customer = data.get_customer(cid)
-        _agents[key] = create_agent(
-            model=MODEL,
-            tools=_build_tools(cid, household_mode),
-            system_prompt=_system_prompt(customer, household_mode),
-            middleware=[ComplianceGateMiddleware()],
-        )
-    return _agents[key]
+    """Built fresh per turn: the system prompt embeds live portfolio figures
+    (net worth, SIP, expenses), so a cached agent would serve stale numbers
+    the moment a transaction lands — and an unbounded cache doesn't scale
+    with customers anyway. Graph construction is a few ms."""
+    customer = data.get_customer(cid)
+    return create_agent(
+        model=MODEL,
+        tools=_build_tools(cid, household_mode),
+        system_prompt=_system_prompt(customer, household_mode),
+        middleware=[ComplianceGateMiddleware()],
+    )
 
 
 def chat(cid, message, history, household_mode=False):
@@ -264,7 +365,6 @@ def chat(cid, message, history, household_mode=False):
     messages.append({"role": "user", "content": message})
 
     token = _events.set([])
-    leads_before = len(data.LEADS)
     t0 = time.perf_counter()
     try:
         result = agent.invoke({"messages": messages})
@@ -277,7 +377,10 @@ def chat(cid, message, history, household_mode=False):
         if isinstance(m, AIMessage) and m.tool_calls:
             events.extend({"tool": tc["name"], "args": tc["args"]} for tc in m.tool_calls)
 
-    lead = data.LEADS[-1] if len(data.LEADS) > leads_before else None
+    # Lead attribution via the request-scoped event log — never by inspecting
+    # the shared queue, which misattributes under concurrent requests.
+    lead = next((e["args"] for e in events if e["tool"] == "_lead_created"), None)
+    events = [e for e in events if e["tool"] != "_lead_created"]
     reply = result["messages"][-1].content
     if isinstance(reply, list):  # content blocks -> plain text
         reply = "".join(b.get("text", "") for b in reply if isinstance(b, dict))
@@ -285,7 +388,8 @@ def chat(cid, message, history, household_mode=False):
     # Deterministic gate enforcement: if the gate fired but the model skipped
     # the handoff, the handoff happens anyway — compliance can't depend on the
     # model feeling like it.
-    gate_fired = any(e["tool"] == "compliance_gate" for e in events)
+    gate_event = next((e for e in events if e["tool"] == "compliance_gate"), None)
+    gate_fired = gate_event is not None
     if gate_fired and lead is None:
         lead = data.create_lead(
             cid, "Regulated product enquiry",
@@ -312,7 +416,9 @@ def chat(cid, message, history, household_mode=False):
         "cost_usd": round(cost_usd, 6), "cost_inr": round(cost_usd * _USD_INR, 4),
         "llm_calls": sum(1 for m in result["messages"] if isinstance(m, AIMessage)),
         "tools_used": [e["tool"] for e in events if e["tool"] != "compliance_gate"],
-        "gate_fired": gate_fired, "lead_created": lead is not None,
+        "gate_fired": gate_fired,
+        "gate_detector": gate_event["args"].get("detector") if gate_event else None,
+        "lead_created": lead is not None,
         "household": household_mode,
     })
     return {"reply": reply, "events": events, "lead": lead}
@@ -341,6 +447,10 @@ def metrics_summary():
         "tool_call_rate_pct": round(sum(1 for m in METRICS if m["tools_used"]) / n * 100),
         "tool_usage": dict(sorted(tool_counts.items(), key=lambda kv: -kv[1])),
         "compliance_gate_triggers": sum(1 for m in METRICS if m["gate_fired"]),
+        "gate_detectors": {
+            "pattern": sum(1 for m in METRICS if m.get("gate_detector") == "pattern"),
+            "llm_backstop": sum(1 for m in METRICS if m.get("gate_detector") == "llm"),
+        },
         "rm_leads_created": sum(1 for m in METRICS if m["lead_created"]),
         "gate_to_lead_conversion_pct": (
             round(sum(1 for m in METRICS if m["gate_fired"] and m["lead_created"])
@@ -457,3 +567,56 @@ def household_report(cid: str) -> dict:
         payload=json.dumps(_fmt_money(payload), default=str, ensure_ascii=False),
     ))
     return {"report": reply.content, "generated": str(data.TODAY), "data": payload}
+
+
+# ---------------------------------------------------------------- RM copilot
+RM_BRIEF_PROMPT = """You are Saarthi, IDBI Bank's AI wealth companion, preparing a human Relationship Manager for a callback. The customer's enquiry involved a regulated product, so the compliance gate routed it here instead of giving AI advice — the RM approves and acts, the AI only stages.
+
+Return STRICT JSON (no code fences) with exactly two keys:
+- "brief": a markdown pre-meeting brief for the RM. Sections: **Who** (one line: name, age, occupation, segment, risk profile), **The ask** (what they asked and why it was gated), **Financial snapshot** (4-6 bullets with the key ₹ numbers), **Suitability signals** (what fits their profile, what to watch), **Talking points** (3 numbered, specific). Under 220 words. Use ONLY the numbers in the data — never invent figures.
+- "draft_message": a warm 2-3 sentence callback confirmation to the customer (SMS/WhatsApp tone, from their IDBI Relationship Manager). Reference their enquiry topic. NO numbers, NO product advice — just confirmation and reassurance.
+
+DATA:
+{payload}
+"""
+
+
+def lead_brief(lead_id: str) -> dict:
+    """Pre-meeting brief + drafted customer message for an RM lead.
+    Deterministic facts assembled in code, narrated once by the LLM; cached
+    on the lead so the console can re-open it instantly."""
+    lead = data.get_lead(lead_id)
+    if not lead:
+        return {"error": "lead not found"}
+    if lead.get("brief"):
+        return {"lead_id": lead_id, "brief": lead["brief"], "draft_message": lead["draft_message"]}
+
+    cid = lead["customer_id"]
+    c = data.get_customer(cid)
+    p = data.portfolio_summary(cid)
+    payload = {
+        "lead": {k: lead[k] for k in ("product", "context", "priority", "household", "created")},
+        "customer": {k: c[k] for k in ("name", "age", "occupation", "segment", "risk_profile", "monthly_income")},
+        "net_worth": p["net_worth"],
+        "allocation": p["allocation"],
+        "monthly_sip": p["monthly_sip"],
+        "avg_monthly_expenses": p["avg_monthly_expenses"],
+        "monthly_surplus": c["monthly_income"] - p["avg_monthly_expenses"] - p["monthly_sip"],
+        "loans": p["loans"], "goals": p["goals"],
+        "financial_health": data.financial_health(cid),
+    }
+    model = init_chat_model(MODEL)
+    reply = model.invoke(RM_BRIEF_PROMPT.format(
+        payload=json.dumps(_fmt_money(payload), default=str, ensure_ascii=False)))
+    text = reply.content if isinstance(reply.content, str) else str(reply.content)
+    try:
+        parsed = json.loads(re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip())
+        brief, draft = parsed["brief"], parsed["draft_message"]
+    except Exception:  # model ignored JSON instructions — degrade gracefully
+        brief, draft = text, (
+            f"Hello {c['name'].split(' ')[0]}, this is your IDBI Relationship Manager. "
+            f"I've received your enquiry about {lead['product'].lower()} and will call you "
+            "within 24 hours to guide you personally. Looking forward to speaking with you!"
+        )
+    lead["brief"], lead["draft_message"] = brief, draft
+    return {"lead_id": lead_id, "brief": brief, "draft_message": draft}

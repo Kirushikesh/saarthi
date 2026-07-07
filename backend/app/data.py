@@ -57,21 +57,25 @@ def _months_back(n):
 
 
 def _gen_transactions(income, profile):
-    """12 months of categorized transactions from a spending profile."""
+    """12 months of RAW transactions (date, narration, amount, direction) —
+    exactly what a bank statement gives you. No category labels here: the
+    analytics layer classifies narrations and derives behaviour after the
+    fact (see analytics.py). Variable incomes (business/freelance) swing
+    ±30-35% month to month, like real irregular cash flows."""
     txns = []
     for month_start in _months_back(12):
         txns.append({
             "date": str(month_start + timedelta(days=0)),
             "desc": profile.get("income_desc", "SALARY CREDIT"),
-            "category": "Income", "amount": round(income * random.uniform(0.97, 1.03) if profile.get("variable_income") else income),
+            "amount": round(income * random.uniform(0.68, 1.35)) if profile.get("variable_income") else income,
             "type": "credit",
         })
-        for cat, (lo, hi, desc) in profile["spends"].items():
+        for _cat, (lo, hi, desc) in profile["spends"].items():
             amt = round(random.uniform(lo, hi))
             if amt > 0:
                 txns.append({
                     "date": str(month_start + timedelta(days=random.randint(2, 26))),
-                    "desc": desc, "category": cat, "amount": amt, "type": "debit",
+                    "desc": desc, "amount": amt, "type": "debit",
                 })
     return txns
 
@@ -162,7 +166,7 @@ CUSTOMERS = {
             "income_desc": "BUSINESS DRAWINGS - MEHTA TEXTILES", "variable_income": True,
             "spends": {
                 "SIP Investments": (225000, 225000, "SIP AUTO DEBIT - MF"),
-                "Household": (60000, 95000, "MIXED UPI/CARD"),
+                "Household": (60000, 95000, "UPI/CARD - HOUSEHOLD SUPERMART"),
                 "Loan EMI": (128000, 128000, "ACH DEBIT - MORTGAGE EMI"),
                 "Club & Lifestyle": (25000, 60000, "CARD - CLUB/GOLF"),
                 "Travel": (20000, 120000, "MAKEMYTRIP/CARD"),
@@ -198,12 +202,61 @@ CUSTOMERS = {
     },
 }
 
-# Pre-generate transactions once (deterministic via seed)
+# Pre-generate raw transactions once (deterministic via seed), then run the
+# narration classifier over them — categories are DERIVED, not authored.
+from . import analytics  # noqa: E402  (after CUSTOMERS so the module stays self-contained)
+
+CLASSIFIER_STATS = {}
 for c in CUSTOMERS.values():
     c["transactions"] = _gen_transactions(c["monthly_income"], c["spend_profile"])
+    CLASSIFIER_STATS[c["id"]] = analytics.categorize_all(c["transactions"])
+
+
+def behavior_summary(cid):
+    """Behavioural profile derived from the customer's raw transactions."""
+    c = get_customer(cid)
+    if not c:
+        return None
+    out = analytics.behavioral_profile(c)
+    out["classifier_coverage"] = CLASSIFIER_STATS[cid]
+    return out
 
 # In-memory RM lead queue (prototype scope; RDS/DynamoDB in production architecture)
 LEADS = []
+
+# Per-customer notification feed, filled by the proactive heartbeat and by
+# RM console actions. Newest first.
+NOTIFICATIONS: dict[str, list] = {}
+_notif_seq = 0
+
+
+def add_notification(cid, icon, title, body, source="heartbeat"):
+    global _notif_seq
+    from datetime import datetime
+    _notif_seq += 1
+    n = {
+        "id": f"N{_notif_seq:03d}",
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "icon": icon, "title": title, "body": body,
+        "source": source, "read": False,
+    }
+    NOTIFICATIONS.setdefault(cid, []).insert(0, n)
+    return n
+
+
+def list_notifications(cid):
+    items = NOTIFICATIONS.get(cid, [])
+    return {"items": items, "unread": sum(1 for n in items if not n["read"])}
+
+
+def mark_notifications_read(cid):
+    for n in NOTIFICATIONS.get(cid, []):
+        n["read"] = True
+    return list_notifications(cid)
+
+
+def get_lead(lead_id):
+    return next((l for l in LEADS if l["id"] == lead_id), None)
 
 # DPDP-style consent registry for Humsafar (household) mode. Household data is
 # shared only while BOTH partners hold an active grant; every grant/revoke is

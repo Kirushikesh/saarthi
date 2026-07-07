@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { LANGS } from './i18n'
 import Chat from './components/Chat'
@@ -22,6 +22,42 @@ export default function App() {
   const [householdMode, setHouseholdMode] = useState(false)
   const [leadFlash, setLeadFlash] = useState(false)
   const [consent, setConsent] = useState(null) // consent status when modal is open
+  const [notifs, setNotifs] = useState({ items: [], unread: 0 })
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [toast, setToast] = useState(null) // newest heartbeat notification, shown briefly
+  const seenNotifIds = useRef(null) // null until first poll → no toast on login backlog
+
+  // Poll the proactive-heartbeat feed; toast anything that arrives live.
+  useEffect(() => {
+    if (!customer) return
+    seenNotifIds.current = null
+    let timer
+    const poll = async () => {
+      try {
+        const n = await api.notifications(customer.id)
+        setNotifs(n)
+        const fresh = seenNotifIds.current
+          ? n.items.filter((i) => !seenNotifIds.current.has(i.id) && !i.read)
+          : []
+        seenNotifIds.current = new Set(n.items.map((i) => i.id))
+        if (fresh.length > 0) {
+          setToast(fresh[0])
+          setTimeout(() => setToast(null), 6000)
+        }
+      } catch { /* backend not up yet */ }
+    }
+    poll()
+    timer = setInterval(poll, 5000)
+    return () => clearInterval(timer)
+  }, [customer])
+
+  const openNotifs = async () => {
+    const opening = !notifOpen
+    setNotifOpen(opening)
+    if (opening && notifs.unread > 0) {
+      try { setNotifs(await api.readNotifications(customer.id)) } catch {}
+    }
+  }
 
   const toggleHousehold = async () => {
     if (householdMode) { setHouseholdMode(false); return }
@@ -53,6 +89,9 @@ export default function App() {
             <span className="appbar-sub">IDBI Mobile · {customer.name.split(' ')[0]}</span>
           </div>
           <div className="appbar-actions">
+            <button className="toggle bell" onClick={openNotifs} title="Saarthi noticed">
+              🔔{notifs.unread > 0 && <span className="bell-badge">{notifs.unread}</span>}
+            </button>
             <select className="lang-select" value={lang} onChange={(e) => setLang(e.target.value)} title="Language">
               {LANGS.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
             </select>
@@ -68,6 +107,39 @@ export default function App() {
             <button onClick={toggleHousehold}>
               {householdMode ? 'Switch to individual' : 'Plan together'}
             </button>
+          </div>
+        )}
+
+        {toast && !notifOpen && (
+          <div className="notif-toast" onClick={() => { setToast(null); openNotifs() }}>
+            <span className="notif-toast-icon">{toast.icon}</span>
+            <div>
+              <div className="notif-toast-title">{toast.title}</div>
+              <div className="notif-toast-sub">Saarthi noticed this for you · tap to view</div>
+            </div>
+          </div>
+        )}
+
+        {notifOpen && (
+          <div className="notif-panel">
+            <div className="notif-panel-head">
+              <b>🫀 Saarthi noticed</b>
+              <span className="notif-panel-sub">Proactive heartbeat — Saarthi watches your money even when you don't ask</span>
+              <button className="modal-close" onClick={() => setNotifOpen(false)}>Close</button>
+            </div>
+            {notifs.items.length === 0 && (
+              <div className="empty-state small">Nothing yet — Saarthi's next heartbeat will scan your portfolio and today's market.</div>
+            )}
+            {notifs.items.map((n) => (
+              <div key={n.id} className={`notif-row ${n.source === 'rm' ? 'rm' : ''}`}>
+                <span className="nudge-icon">{n.icon}</span>
+                <div>
+                  <div className="nudge-title">{n.title}</div>
+                  <div className="nudge-body">{n.body}</div>
+                  <div className="notif-meta">{n.source === 'rm' ? 'From your Relationship Manager' : 'Heartbeat insight'} · {n.ts.replace('T', ' ')}</div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -161,10 +233,12 @@ function Sidebar() {
         <li><b>📈 Market pulse</b> — daily index moves translated into "your funds today" impact</li>
         <li><b>🔐 Consent-first households</b> — Humsafar mode activates only on mutual, revocable, audit-logged consent (DPDP-aligned)</li>
         <li><b>📊 360° portfolio</b> — savings, FDs, MFs, NPS, EPF, spends & goals in one view</li>
-        <li><b>🎯 Suitability engine</b> — age, risk profile & segment-aware recommendations</li>
+        <li><b>🎯 Suitability engine</b> — deterministic product scoring (risk band, horizon, buffer, behaviour) with a SEBI-style advice audit trail</li>
+        <li><b>🧠 Behavioural analytics</b> — spend categories & behaviour signals derived from raw transaction narrations, not pre-labeled data</li>
         <li><b>🧮 Scenario simulation</b> — "Can I afford it?" answered with EMI + FOIR math</li>
         <li><b>🧭 Life planning</b> — retirement readiness, tax-saving lens & target-SIP planning, all code-computed</li>
-        <li><b>🛡️ Compliance gate</b> — regulated products auto-route to human RMs as qualified leads (SEBI/IRDAI-aware hybrid model)</li>
+        <li><b>🫀 Proactive heartbeat</b> — a background pulse scans every portfolio against today's market and reaches out first: 🔔 alerts arrive unprompted</li>
+        <li><b>🛡️ Compliance gate + RM copilot</b> — regulated intents detected in all 7 languages (multilingual patterns + LLM backstop), routed to human RMs as qualified leads with an AI pre-meeting brief the RM just approves</li>
         <li><b>👫 Humsafar mode</b> — India's first household-level advisory: joint net worth, joint goals & an impartial money mediator, with a monthly "State of our Union" report</li>
       </ul>
       <p className="side-note">Synthetic data only · Prototype for IDBI Innovate 2026 · Team FinFusion.AI</p>

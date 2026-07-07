@@ -12,6 +12,8 @@ export const api = {
   household: (id) => get(`/api/household/${id}`),
   nudges: (id) => get(`/api/nudges/${id}`),
   healthScore: (id) => get(`/api/health-score/${id}`),
+  behavior: (id) => get(`/api/behavior/${id}`),
+  suitability: (id) => get(`/api/suitability/${id}`),
   market: (id) => get(`/api/market/${id}`),
   consent: (id) => get(`/api/consent/${id}`),
   setConsent: async (id, grant) => {
@@ -25,6 +27,22 @@ export const api = {
   },
   report: (id) => get(`/api/report/${id}`),
   leads: () => get('/api/leads'),
+  notifications: (id) => get(`/api/notifications/${id}`),
+  readNotifications: async (id) => {
+    const r = await fetch(`${BASE}/api/notifications/${id}/read`, { method: 'POST' })
+    if (!r.ok) throw new Error(r.statusText)
+    return r.json()
+  },
+  leadBrief: (leadId) => get(`/api/leads/${leadId}/brief`),
+  approveLead: async (leadId, message) => {
+    const r = await fetch(`${BASE}/api/leads/${leadId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    })
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
+    return r.json()
+  },
   chat: async (body) => {
     const r = await fetch(`${BASE}/api/chat`, {
       method: 'POST',
