@@ -66,6 +66,27 @@ def nudges(cid: str):
     return agents.nudges(cid)
 
 
+@app.get("/api/health-score/{cid}")
+def health_score(cid: str):
+    if not data.get_customer(cid):
+        raise HTTPException(404, "customer not found")
+    return data.financial_health(cid)
+
+
+@app.get("/api/report/{cid}")
+def report(cid: str):
+    """'State of our Union' household report (deterministic data + LLM narration)."""
+    if not data.get_customer(cid):
+        raise HTTPException(404, "customer not found")
+    try:
+        out = agents.household_report(cid)
+    except Exception as e:
+        raise HTTPException(502, f"Report generation failed: {e}")
+    if "error" in out:
+        raise HTTPException(404, out["error"])
+    return out
+
+
 @app.get("/api/leads")
 def leads():
     return list(reversed(data.LEADS))

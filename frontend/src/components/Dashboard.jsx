@@ -4,15 +4,43 @@ import { api, inr } from '../api'
 
 const COLORS = ['#0d9488', '#f59e0b', '#0369a1', '#7c3aed', '#e11d48']
 
+function HealthGauge({ health }) {
+  const R = 52, C = Math.PI * R // semicircle circumference
+  const color = health.score >= 80 ? '#16a34a' : health.score >= 60 ? '#0d9488' : health.score >= 40 ? '#f59e0b' : '#e11d48'
+  return (
+    <div className="card">
+      <div className="card-title">Financial Health Score</div>
+      <div className="health-row">
+        <svg width="130" height="76" viewBox="0 0 130 76">
+          <path d="M 13 68 A 52 52 0 0 1 117 68" fill="none" stroke="#e2e8f0" strokeWidth="11" strokeLinecap="round" />
+          <path d="M 13 68 A 52 52 0 0 1 117 68" fill="none" stroke={color} strokeWidth="11" strokeLinecap="round"
+            strokeDasharray={`${(health.score / 100) * C} ${C}`} />
+          <text x="65" y="58" textAnchor="middle" fontSize="24" fontWeight="800" fill={color}>{health.score}</text>
+          <text x="65" y="72" textAnchor="middle" fontSize="10" fill="#64748b">{health.grade}</text>
+        </svg>
+        <div className="health-pillars">
+          {health.pillars.map((pl) => (
+            <div key={pl.name} className="pillar" title={pl.detail}>
+              <div className="pillar-head"><span>{pl.name}</span><b>{pl.score}/{pl.max}</b></div>
+              <div className="pillar-bar"><div style={{ width: `${(pl.score / pl.max) * 100}%` }} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard({ customer }) {
   const [p, setP] = useState(null)
   const [nudges, setNudges] = useState([])
+  const [health, setHealth] = useState(null)
   const [err, setErr] = useState(null)
 
   useEffect(() => {
     setP(null)
-    Promise.all([api.portfolio(customer.id), api.nudges(customer.id)])
-      .then(([pf, nd]) => { setP(pf); setNudges(nd) })
+    Promise.all([api.portfolio(customer.id), api.nudges(customer.id), api.healthScore(customer.id)])
+      .then(([pf, nd, hs]) => { setP(pf); setNudges(nd); setHealth(hs) })
       .catch((e) => setErr(e.message))
   }, [customer.id])
 
@@ -32,6 +60,8 @@ export default function Dashboard({ customer }) {
           Assets {inr(p.total_assets)} · Liabilities {inr(p.total_liabilities)} · SIP {inr(p.monthly_sip)}/mo
         </div>
       </div>
+
+      {health && <HealthGauge health={health} />}
 
       <div className="card">
         <div className="card-title">Asset Allocation</div>

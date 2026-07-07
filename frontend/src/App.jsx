@@ -98,8 +98,9 @@ function Sidebar() {
         <li><b>📊 360° portfolio</b> — savings, FDs, MFs, NPS, EPF, spends & goals in one view</li>
         <li><b>🎯 Suitability engine</b> — age, risk profile & segment-aware recommendations</li>
         <li><b>🧮 Scenario simulation</b> — "Can I afford it?" answered with EMI + FOIR math</li>
+        <li><b>🧭 Life planning</b> — retirement readiness, tax-saving lens & target-SIP planning, all code-computed</li>
         <li><b>🛡️ Compliance gate</b> — regulated products auto-route to human RMs as qualified leads (SEBI/IRDAI-aware hybrid model)</li>
-        <li><b>👫 Humsafar mode</b> — India's first household-level advisory: joint net worth, joint goals & an impartial money mediator</li>
+        <li><b>👫 Humsafar mode</b> — India's first household-level advisory: joint net worth, joint goals & an impartial money mediator, with a monthly "State of our Union" report</li>
       </ul>
       <p className="side-note">Synthetic data only · Prototype for IDBI Innovate 2026 · Team FinFusion.AI</p>
     </aside>

@@ -12,11 +12,11 @@ const GREET = {
 
 const SUGGESTIONS = {
   individual: {
-    en: ['How are my investments doing?', 'Can I afford a ₹50 lakh home loan for 20 years?', 'Where does my money go every month?', 'I want to buy term insurance'],
-    hi: ['मेरे निवेश कैसे चल रहे हैं?', 'क्या मैं 20 साल के लिए ₹50 लाख का होम लोन ले सकता हूँ?', 'मेरा पैसा हर महीने कहाँ जाता है?'],
+    en: ['How are my investments doing?', 'Am I on track for retirement?', 'How much more tax can I save this year?', 'Can I afford a ₹50 lakh home loan for 20 years?', 'I want to buy term insurance'],
+    hi: ['मेरे निवेश कैसे चल रहे हैं?', 'क्या मैं रिटायरमेंट के लिए तैयार हूँ?', 'क्या मैं 20 साल के लिए ₹50 लाख का होम लोन ले सकता हूँ?'],
   },
   household: {
-    en: ['Can WE afford a ₹80 lakh home loan together?', 'How should we split savings for our home goal?', "What happens if one of us takes a 6-month sabbatical?", 'Show our combined net worth'],
+    en: ['Can WE afford a ₹80 lakh home loan together?', 'How should we split savings for our home goal?', 'Are we on track to retire at 60?', 'Show our combined net worth'],
     hi: ['क्या हम मिलकर ₹80 लाख का होम लोन ले सकते हैं?', 'घर के लक्ष्य के लिए बचत कैसे बाँटें?'],
   },
 }

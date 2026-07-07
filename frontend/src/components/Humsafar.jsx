@@ -1,14 +1,29 @@
 import { useEffect, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { api, inr } from '../api'
 
 export default function Humsafar({ customer }) {
   const [h, setH] = useState(null)
   const [err, setErr] = useState(null)
+  const [report, setReport] = useState(null)
+  const [reporting, setReporting] = useState(false)
 
   useEffect(() => {
-    setH(null); setErr(null)
+    setH(null); setErr(null); setReport(null)
     api.household(customer.id).then(setH).catch((e) => setErr(e.message))
   }, [customer.id])
+
+  const generateReport = async () => {
+    setReporting(true)
+    try {
+      const r = await api.report(customer.id)
+      setReport(r.report)
+    } catch (e) {
+      setReport(`⚠️ ${e.message}`)
+    } finally {
+      setReporting(false)
+    }
+  }
 
   if (err) return (
     <div className="pad">
@@ -70,6 +85,28 @@ export default function Humsafar({ customer }) {
         <div className="mediator-hint">
           💬 Ask Saarthi in Humsafar mode: <i>"How should we split savings for our home goal?"</i> — the Mediator suggests income-proportional plans that feel fair to both.
         </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">State of our Union</div>
+        {!report && (
+          <>
+            <p className="muted" style={{ margin: '4px 0 10px' }}>
+              A monthly AI report on your combined finances — headline, health scores, joint goals, retirement check and three actions for the month.
+            </p>
+            <button className="report-btn" onClick={generateReport} disabled={reporting}>
+              {reporting ? '✍️ Saarthi is writing your report…' : '📜 Generate this month\'s report'}
+            </button>
+          </>
+        )}
+        {report && (
+          <div className="report-body">
+            <ReactMarkdown>{report}</ReactMarkdown>
+            <button className="chip" onClick={generateReport} disabled={reporting}>
+              {reporting ? '✍️ Rewriting…' : '↻ Regenerate'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

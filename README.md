@@ -12,9 +12,14 @@ Saarthi is an avatar-based, multilingual AI wealth advisor designed to embed ins
 | 📊 360° portfolio | Savings, FDs, MFs, NPS, EPF, categorized spends, goals — one dashboard |
 | 🎯 Suitability engine | Age, risk-profile and segment-aware recommendations, down to specific IDBI MF schemes |
 | 🧮 Scenario simulation | "Can I afford a ₹50L home loan?" → EMI, FOIR, surplus math with a clear verdict |
+| 🧭 Retirement readiness | Projected corpus vs inflation-adjusted need (4% rule) and the exact extra monthly SIP to close the gap — individually or as a couple |
+| 🧾 Tax-saving lens | 80C / 80CCD(1B) utilization computed from actual ELSS SIPs and payroll, with rupee headroom and suggested actions |
+| 📈 Target-SIP planner | "How much monthly to reach ₹50L in 10 years?" → inverse SIP math, checked against the customer's real surplus |
+| ❤️ Financial Health Score | 0–100 score across four pillars (emergency buffer, diversification, debt headroom, goal funding) — gauge on the dashboard, tool for the agent |
 | 🛡️ Compliance & Suitability Gate | Vanilla products (FD/RD/MF/PPF/NPS) advised directly; regulated products (insurance, ULIP, PMS, AIF) auto-route to a human RM as a **qualified lead** — the SEBI/IRDAI-compliant hybrid model IDBI asked for |
 | 👫 Humsafar mode | Linked partners get combined analysis, joint goal planning and a data-driven mediator |
-| 🔔 Proactive nudges | Allocation gaps, idle surplus, thin emergency funds, off-track goals |
+| 📜 State of our Union | One-tap monthly household report: headline, cash flow, both partners' health scores, joint goals with fair splits, retirement check and three actions — deterministic numbers, AI narration |
+| 🔔 Proactive nudges | Allocation gaps, idle surplus, thin emergency funds, off-track goals, unclaimed tax savings |
 
 ## Architecture
 
@@ -27,7 +32,8 @@ FastAPI ──────────────────► ADK live sessi
    ▼                                ▼
 LangChain create_agent  ◄───────────┘   ← one brain for both channels
    ├── @tools: portfolio · household view · loan simulation (EMI/FOIR)
-   │           goal planner (deterministic math) · product catalog · RM lead
+   │           goal planner · target-SIP · retirement projection · tax lens
+   │           financial health score · product catalog · RM lead
    ├── ComplianceGateMiddleware (wrap_model_call): regulated intents get a
    │   hard handoff directive + deterministic lead-creation fallback
    └── Synthetic bank data (round-1 scope) + RM lead queue
@@ -56,14 +62,15 @@ npm run dev        # http://localhost:5173 (proxies /api and /ws to :8000)
 
 ## Deploy
 
-- **Backend → Railway**: point a service at `backend/` (railway.toml included), set `OPENAI_API_KEY`.
+- **Backend → Railway**: point a service at `backend/` (railway.toml included), set `OPENAI_API_KEY` and `GOOGLE_API_KEY`.
 - **Frontend → Vercel**: point a project at `frontend/`, set `VITE_API_URL=https://<railway-app>.up.railway.app`.
 
 ## Demo script (3 minutes)
 
 1. Sign in as **Rohan** → avatar greets you; ask *"How are my investments doing?"*
 2. Switch language to **हिन्दी**, ask by voice — replies in Hindi, spoken aloud.
-3. Ask *"Can I afford a ₹50 lakh home loan for 20 years?"* → EMI/FOIR simulation.
+3. Ask *"Can I afford a ₹50 lakh home loan for 20 years?"* → EMI/FOIR simulation; then *"Am I on track for retirement?"* → corpus projection + the exact extra SIP needed.
 4. Ask about **term insurance** → Compliance Gate declines direct advice, books an RM callback → watch it land in the **RM Console** tab.
 5. Tap **Plan together** (Humsafar mode) → *"Can WE afford an ₹80 lakh home loan?"* → joint assessment on combined income; *"How should we split savings for our home goal?"* → impartial mediator plan.
-6. Show the **Portfolio** tab: allocation, holdings, goals, Saarthi Insights nudges.
+6. In the **Humsafar** tab, tap **Generate this month's report** → the "State of our Union" household report writes itself.
+7. Show the **Portfolio** tab: Financial Health Score gauge, allocation, holdings, goals, Saarthi Insights nudges.

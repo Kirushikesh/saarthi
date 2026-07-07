@@ -342,6 +342,141 @@ def plan_goal(cid, goal_name, household=False):
     return out
 
 
+def sip_target(cid, target_amount, years, expected_return_pct=12.0):
+    """Inverse SIP calculator: monthly SIP needed to reach a target corpus."""
+    c = get_customer(cid)
+    r = expected_return_pct / 12 / 100
+    n = max(1, int(years * 12))
+    monthly = target_amount * r / ((1 + r) ** n - 1) if r > 0 else target_amount / n
+    monthly = round(monthly)
+    p = portfolio_summary(cid)
+    surplus = c["monthly_income"] - p["avg_monthly_expenses"] - p["monthly_sip"]
+    return {
+        "target_amount": target_amount, "years": years,
+        "expected_return_pct": expected_return_pct,
+        "required_monthly_sip": monthly,
+        "total_invested": monthly * n,
+        "wealth_gained": round(target_amount - monthly * n),
+        "current_monthly_surplus": surplus,
+        "fits_in_surplus": monthly <= surplus,
+    }
+
+
+def retirement_projection(cid, retirement_age=60, household=False):
+    """Project the retirement corpus from current assets + SIPs, compare with
+    the inflation-adjusted corpus needed, and compute the extra SIP to close
+    any gap. Assumptions: equity/SIP 12% p.a., EPF/NPS/FD 8% p.a., inflation
+    6% p.a., corpus need = 25x first-year retirement expenses (4% rule)."""
+    members = [cid]
+    c = get_customer(cid)
+    if household and c["partner_id"]:
+        members.append(c["partner_id"])
+
+    years_left = max(1, retirement_age - max(get_customer(m)["age"] for m in members))
+    n = years_left * 12
+    r_eq, r_debt, inflation = 0.12 / 12, 0.08 / 12, 0.06
+
+    corpus, monthly_sip, expenses = 0, 0, 0
+    for m in members:
+        p = portfolio_summary(m)
+        cm = get_customer(m)
+        eq_now = p["mf_current"]
+        debt_now = p["allocation"]["Fixed Deposits"] + cm["nps"] + cm["epf"] + cm["savings_balance"]
+        corpus += eq_now * (1 + r_eq) ** n + debt_now * (1 + r_debt) ** n
+        corpus += p["monthly_sip"] * (((1 + r_eq) ** n - 1) / r_eq)
+        monthly_sip += p["monthly_sip"]
+        expenses += p["avg_monthly_expenses"]
+
+    corpus = round(corpus)
+    future_monthly_expenses = round(expenses * (1 + inflation) ** years_left)
+    corpus_needed = future_monthly_expenses * 12 * 25  # 4% withdrawal rule
+    gap = corpus_needed - corpus
+    extra_sip = round(gap * r_eq / ((1 + r_eq) ** n - 1)) if gap > 0 else 0
+    return {
+        "assessed_for": [get_customer(m)["name"] for m in members],
+        "retirement_age": retirement_age, "years_to_retirement": years_left,
+        "projected_corpus": corpus,
+        "current_monthly_sip": monthly_sip,
+        "todays_monthly_expenses": expenses,
+        "monthly_expenses_at_retirement_inflation_adjusted": future_monthly_expenses,
+        "corpus_needed_4pct_rule": corpus_needed,
+        "surplus_or_gap": corpus - corpus_needed,
+        "on_track": corpus >= corpus_needed,
+        "extra_monthly_sip_to_close_gap": extra_sip,
+        "assumptions": "equity 12% p.a., debt/EPF/NPS 8% p.a., inflation 6% p.a., corpus = 25x first-year expenses",
+    }
+
+
+def tax_summary(cid):
+    """Section 80C / 80CCD(1B) utilization from actual holdings and payroll."""
+    c = get_customer(cid)
+    elss_annual = sum(h["sip_monthly"] for h in c["holdings"] if "ELSS" in h["name"]) * 12
+    # Employee EPF contribution ~12% of basic (basic ~40% of gross) for salaried
+    epf_annual = round(c["monthly_income"] * 0.40 * 0.12) * 12 if c["epf"] > 0 else 0
+    used_80c = min(150000, elss_annual + epf_annual)
+    headroom_80c = 150000 - used_80c
+    nps_50k_used = c["nps"] > 0  # simplification: NPS contributors use 80CCD(1B)
+    headroom_80ccd1b = 0 if nps_50k_used else 50000
+    # Marginal slab (new regime approx) just for savings framing
+    annual_income = c["monthly_income"] * 12
+    slab = 30 if annual_income > 2400000 else 25 if annual_income > 2000000 else 20 if annual_income > 1600000 else 15
+    potential_saving = round((headroom_80c + headroom_80ccd1b) * slab / 100)
+    return {
+        "regime_note": "80C/80CCD apply under the old regime; figures are indicative for planning",
+        "sec_80c": {"limit": 150000, "used": used_80c, "headroom": headroom_80c,
+                     "components": {"ELSS SIPs (annual)": elss_annual, "EPF employee contribution (est.)": epf_annual}},
+        "sec_80ccd_1b_nps": {"limit": 50000, "headroom": headroom_80ccd1b},
+        "marginal_slab_pct": slab,
+        "potential_annual_tax_saving": potential_saving,
+        "suggested_actions": [a for a in [
+            f"Invest ₹{headroom_80c:,} more in IDBI ELSS Tax Saver Fund to max out 80C" if headroom_80c > 0 else None,
+            "Open NPS and claim the extra ₹50,000 deduction under 80CCD(1B)" if headroom_80ccd1b > 0 else None,
+        ] if a],
+    }
+
+
+def financial_health(cid):
+    """Financial Health Score (0-100) across four measurable pillars."""
+    c = get_customer(cid)
+    p = portfolio_summary(cid)
+
+    # 1. Emergency buffer: months of expenses covered by savings (target 6)
+    months = c["savings_balance"] / max(p["avg_monthly_expenses"], 1)
+    s_emergency = round(min(months / 6, 1) * 25)
+
+    # 2. Diversification: equity share vs age-appropriate ideal (100 - age)
+    eq = sum(h["current"] for h in p["holdings"] if "Equity" in h["asset_class"] or "Hybrid" in h["asset_class"])
+    eq_pct = eq / p["total_assets"] * 100 if p["total_assets"] else 0
+    ideal = max(20, min(70, 100 - c["age"]))
+    s_divers = round(max(0, 1 - abs(eq_pct - ideal) / ideal) * 25)
+
+    # 3. Debt headroom: existing FOIR vs the ~52% bank cap
+    existing_emi = sum(l["emi"] for l in c["loans"])
+    foir = existing_emi / c["monthly_income"] * 100
+    s_debt = round(max(0, 1 - foir / 52) * 25)
+
+    # 4. Goal funding: average % funded across saved goals
+    funded = [min(g["saved"] / g["target"], 1) for g in c["goals"]] or [0]
+    s_goals = round(sum(funded) / len(funded) * 25)
+
+    score = s_emergency + s_divers + s_debt + s_goals
+    grade = ("Excellent" if score >= 80 else "Good" if score >= 60
+             else "Fair" if score >= 40 else "Needs attention")
+    return {
+        "score": score, "grade": grade,
+        "pillars": [
+            {"name": "Emergency buffer", "score": s_emergency, "max": 25,
+             "detail": f"Savings cover {months:.1f} months of expenses (target 6)"},
+            {"name": "Diversification", "score": s_divers, "max": 25,
+             "detail": f"{eq_pct:.0f}% market-linked vs ~{ideal}% ideal for age {c['age']}"},
+            {"name": "Debt headroom", "score": s_debt, "max": 25,
+             "detail": f"Existing EMIs use {foir:.0f}% of income (bank cap ~52%)"},
+            {"name": "Goal funding", "score": s_goals, "max": 25,
+             "detail": f"Goals are {round(sum(funded) / len(funded) * 100)}% funded on average"},
+        ],
+    }
+
+
 def create_lead(cid, product, context, household=False):
     c = get_customer(cid)
     lead = {

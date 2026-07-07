@@ -11,12 +11,14 @@ Architecture:
   (see voice.py), which delegates to it via an `ask_saarthi` tool.
 """
 
+import json
 import os
 import re
 from contextvars import ContextVar
 from typing import Callable
 
 from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from langchain.tools import tool
 from langchain_core.messages import AIMessage, SystemMessage
@@ -117,6 +119,37 @@ def _build_tools(cid: str, household_mode: bool):
         return data.plan_goal(cid, goal_name, household)
 
     @tool
+    def plan_sip_target(target_amount: float, years: float, expected_return_pct: float = 12.0) -> dict:
+        """Inverse SIP calculator: the monthly SIP needed to reach a target
+        corpus in a given number of years, and whether it fits the customer's
+        current surplus. Use for 'how much should I invest monthly to get ₹X
+        by year Y' questions. ALWAYS use this instead of doing the math yourself."""
+        return data.sip_target(cid, target_amount, years, expected_return_pct)
+
+    @tool
+    def project_retirement(retirement_age: int = 60, household: bool = household_mode) -> dict:
+        """Retirement readiness projection: projected corpus from current assets
+        and SIPs vs the inflation-adjusted corpus needed (4% rule), plus the
+        extra monthly SIP to close any gap. Use for any retirement question.
+        ALWAYS use this instead of computing projections yourself."""
+        return data.retirement_projection(cid, retirement_age, household)
+
+    @tool
+    def get_tax_summary() -> dict:
+        """Tax-saving lens: Section 80C and 80CCD(1B) NPS utilization computed
+        from the customer's actual ELSS SIPs and payroll, remaining headroom,
+        and the potential annual tax saving. Use for 'how can I save tax'
+        questions."""
+        return data.tax_summary(cid)
+
+    @tool
+    def get_financial_health() -> dict:
+        """Financial Health Score (0-100) with four scored pillars: emergency
+        buffer, diversification, debt headroom and goal funding. Use when the
+        customer asks how healthy their finances are or for an overall review."""
+        return data.financial_health(cid)
+
+    @tool
     def get_product_catalog() -> dict:
         """IDBI product catalog: 'vanilla' products the AI may directly recommend
         (FD, RD, MF SIP, PPF, NPS, SSY) with current rates, available MF schemes,
@@ -133,7 +166,8 @@ def _build_tools(cid: str, household_mode: bool):
         return {"lead_created": data.create_lead(cid, product, context, household_mode)}
 
     return [get_portfolio, get_household_view, simulate_loan_affordability,
-            plan_goal, get_product_catalog, create_rm_lead]
+            plan_goal, plan_sip_target, project_retirement, get_tax_summary,
+            get_financial_health, get_product_catalog, create_rm_lead]
 
 
 # ---------------------------------------------------------------- prompt
@@ -273,4 +307,77 @@ def nudges(cid):
     if emergency < 4:
         out.append({"icon": "⚠️", "title": "Thin emergency buffer",
                     "body": f"Savings cover ~{emergency:.1f} months of expenses; 6 months is the safe floor — especially with variable income."})
+    tax = data.tax_summary(cid)
+    if tax["potential_annual_tax_saving"] > 0:
+        out.append({"icon": "🧾", "title": f"₹{tax['potential_annual_tax_saving']:,} in tax savings unclaimed",
+                    "body": "You have unused 80C/NPS headroom. Ask me how to use it before March."})
     return out[:4]
+
+
+# ---------------------------------------------------------------- reports
+REPORT_PROMPT = """You are Saarthi, IDBI Bank's AI wealth companion. Write the couple's monthly "State of our Union" household financial report as clean markdown.
+
+Rules:
+- Use ONLY the numbers in the data below — never invent or recompute figures.
+- ₹ and Indian formatting (lakh/crore). Warm, plain-English, impartial between partners.
+- Structure: ## 👫 State of our Union — {month}
+  then short sections: **The headline** (net worth + one-line verdict), **Cash flow**, **Financial health** (both partners' scores), **Joint goals** (on/off track, required monthly saving, fair split), **Retirement check**, **Three actions for this month** (numbered, specific, from the data).
+- Under 350 words. No disclaimers except one final line: "_Mutual fund investments are subject to market risks._"
+
+DATA:
+{payload}
+"""
+
+
+def _inr(n: int) -> str:
+    """Indian digit grouping: 25815660 -> ₹2,58,15,660."""
+    sign, n = ("-" if n < 0 else ""), abs(int(n))
+    s = str(n)
+    if len(s) > 3:
+        head, tail = s[:-3], s[-3:]
+        parts = []
+        while len(head) > 2:
+            parts.insert(0, head[-2:])
+            head = head[:-2]
+        s = ",".join(([head] if head else []) + parts + [tail])
+    return f"{sign}₹{s}"
+
+
+def _fmt_money(obj):
+    """Pre-format rupee amounts so the LLM copies them verbatim instead of
+    re-grouping digits (where it makes lakh/crore comma mistakes)."""
+    if isinstance(obj, dict):
+        return {k: _fmt_money(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_fmt_money(v) for v in obj]
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, (int, float)) and abs(obj) >= 1000:
+        return _inr(obj)
+    return obj
+
+
+def household_report(cid: str) -> dict:
+    """Generate the 'State of our Union' household report: deterministic
+    facts assembled in code, narrated once by the LLM."""
+    h = data.household_summary(cid)
+    if not h:
+        return {"error": "No linked partner for this customer."}
+    payload = {
+        "month": data.TODAY.strftime("%B %Y"),
+        "household": {k: h[k] for k in ("net_worth", "total_assets", "total_liabilities",
+                                          "combined_income", "combined_expenses", "combined_sip")},
+        "members": [
+            {"name": m["name"], "income": m["monthly_income"],
+             "health": data.financial_health(m["id"])}
+            for m in h["members"]
+        ],
+        "joint_goals": [data.plan_goal(cid, g["name"], household=True) for g in h["joint_goals"]],
+        "retirement": data.retirement_projection(cid, household=True),
+    }
+    model = init_chat_model(MODEL)
+    reply = model.invoke(REPORT_PROMPT.format(
+        month=payload["month"],
+        payload=json.dumps(_fmt_money(payload), default=str, ensure_ascii=False),
+    ))
+    return {"report": reply.content, "generated": str(data.TODAY), "data": payload}
