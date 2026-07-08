@@ -4,10 +4,13 @@ import asyncio
 import base64
 import json
 import logging
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 load_dotenv()
@@ -17,6 +20,7 @@ from . import agents, data, heartbeat, suitability, voice
 logger = logging.getLogger("saarthi.api")
 
 app = FastAPI(title="Saarthi API", version="0.1.0")
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 @app.on_event("startup")
@@ -298,3 +302,25 @@ async def voice_ws(ws: WebSocket, cid: str, household: bool = False):
         logger.exception("Voice session error for %s", cid)
     finally:
         queue.close()
+
+
+if FRONTEND_DIR.exists():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=FRONTEND_DIR / "assets"),
+        name="frontend-assets",
+    )
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_frontend(full_path: str):
+    """Serve the bundled Vite app when backend and frontend share one container."""
+    if not FRONTEND_DIR.exists():
+        raise HTTPException(404, "frontend build not found")
+    if full_path.startswith(("api/", "ws/")):
+        raise HTTPException(404, "not found")
+
+    requested = FRONTEND_DIR / full_path
+    if requested.is_file():
+        return FileResponse(requested)
+    return FileResponse(FRONTEND_DIR / "index.html")
