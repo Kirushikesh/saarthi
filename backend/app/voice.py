@@ -24,6 +24,12 @@ logger = logging.getLogger("saarthi.voice")
 LIVE_MODEL = os.environ.get("LIVE_MODEL", "gemini-3.1-flash-live-preview")
 APP_NAME = "saarthi-voice"
 
+# Saarthi's avatar is a woman, so she speaks with a female voice. Gemini Live's
+# default prebuilt voice reads male, hence the explicit override. "Kore" is a
+# warm, firm female voice that suits a professional wealth companion; override
+# with LIVE_VOICE (other female options: Aoede, Leda, Autonoe, Callirrhoe).
+LIVE_VOICE = os.environ.get("LIVE_VOICE", "Kore")
+
 INPUT_SAMPLE_RATE = 16000
 OUTPUT_SAMPLE_RATE = 24000
 
@@ -103,6 +109,13 @@ async def start_live_session(cid: str, household_mode: bool):
         run_config=RunConfig(
             streaming_mode=StreamingMode.BIDI,
             response_modalities=["AUDIO"],
+            # Voice selection is a runtime/session setting (on RunConfig), not an
+            # Agent property — a female voice to match Saarthi's avatar.
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=LIVE_VOICE)
+                )
+            ),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
         ),

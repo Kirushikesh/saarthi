@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import { api } from '../api'
 import { useSpeech } from '../useSpeech'
 import { useVoiceSession } from '../useVoiceSession'
-import Avatar from './Avatar'
+import Avatar3D, { AvatarLoading } from './Avatar3D'
 
 import { GREET, SUGGESTIONS, UI, t } from '../i18n'
 
@@ -31,7 +31,6 @@ export default function Chat({ customer, householdMode, lang, voiceOn, sugam, on
   const [busy, setBusy] = useState(false)
   const [statusText, setStatusText] = useState(null)
   const speech = useSpeech(lang)
-  const bottomRef = useRef(null)
   const speechRef = useRef(speech)
   speechRef.current = speech
 
@@ -62,9 +61,8 @@ export default function Chat({ customer, householdMode, lang, voiceOn, sugam, on
     setMessages([{ role: 'assistant', content: (GREET[lang] || GREET.en)(customer.name.split(' ')[0]) }])
   }, [customer.id, householdMode, lang]) // eslint-disable-line
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, busy])
+  // The transcript is bottom-anchored and masks itself as it rises, so no
+  // manual scrolling is needed — the newest line always sits at the bottom.
 
   const send = async (text) => {
     const msg = (text ?? input).trim()
@@ -115,82 +113,97 @@ export default function Chat({ customer, householdMode, lang, voiceOn, sugam, on
     : 'idle'
   const sugg = t(SUGGESTIONS[householdMode ? 'household' : 'individual'], lang)
 
+  const statusLine =
+    voice.error ? `⚠️ ${voice.error}`
+    : avatarState === 'speaking' ? (lang === 'hi' ? 'बोल रही हूँ…' : 'Speaking…')
+    : avatarState === 'thinking' ? (statusText || (lang === 'hi' ? 'सोच रही हूँ…' : 'Consulting your portfolio…'))
+    : voice.live ? (lang === 'hi' ? 'लाइव — बोलिए…' : 'Live — just start talking')
+    : avatarState === 'listening' ? (lang === 'hi' ? 'सुन रही हूँ…' : 'Listening…')
+    : householdMode ? 'Household mode · advising your household' : `Advising ${customer.name.split(' ')[0]} · ${customer.risk_profile}`
+
   return (
-    <div className="chat">
-      <div className="chat-avatar-strip">
-        <Avatar state={avatarState} size={148}
-          levelRef={voice.live ? voice.levelRef : speech.levelRef} />
-        <div className="avatar-status" role="status">
-          {voice.error ? `⚠️ ${voice.error}`
-            : avatarState === 'speaking' ? (lang === 'hi' ? 'बोल रही हूँ…' : 'Speaking…')
-            : avatarState === 'thinking' ? (statusText || (lang === 'hi' ? 'सोच रही हूँ…' : 'Consulting your portfolio…'))
-            : voice.live ? (lang === 'hi' ? 'लाइव — बोलिए…' : 'Live — just start talking')
-            : avatarState === 'listening' ? (lang === 'hi' ? 'सुन रही हूँ…' : 'Listening…')
-            : householdMode ? 'Household mode · advising your household' : `Advising ${customer.name.split(' ')[0]} · ${customer.risk_profile}`}
-        </div>
-        <button className={`chip live-chip ${voice.live ? 'on' : ''}`} onClick={toggleLive}>
-          {voice.live ? '◼ End live' : '🎙 Live voice'}
-        </button>
-        {speech.speaking && (
-          <button className="chip stop-chip" onClick={speech.stopSpeaking}>◼ Stop voice</button>
-        )}
+    <div className={`stage ${householdMode ? 'household' : ''}`}>
+      {/* Full-screen 3D advisor — the figure you talk to. Transparent canvas so
+          the transcript floats over the very same stage background. */}
+      <div className="stage-scene">
+        <Avatar3D state={avatarState} levelRef={voice.live ? voice.levelRef : speech.levelRef} />
       </div>
+      <AvatarLoading />
 
-      <div className="chat-scroll" role="log" aria-live="polite" aria-label="Conversation with Saarthi">
-        {messages.map((m, i) => (
-          <div key={i} className={`bubble ${m.role}`}>
-            <ReactMarkdown>{m.content}</ReactMarkdown>
-            {m.lead && (
-              <div className="lead-card">
-                <div className="lead-title">🤝 RM callback booked</div>
-                <div>{m.lead.product} · Lead {m.lead.id} · Priority {m.lead.priority}</div>
-                <div className="lead-sub">A certified IDBI Relationship Manager will reach out to you shortly.</div>
-              </div>
-            )}
-            {m.events?.length > 0 && (
-              <div className="events">
-                {m.events.map((e, j) => (
-                  <span key={j} className="event-tag">⚙ {e.tool.replaceAll('_', ' ')}</span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-        {busy && !messages[messages.length - 1]?.streaming && (
-          <div className="bubble assistant typing">
-            {statusText && <span className="typing-status">{statusText}</span>}
-            <span /><span /><span />
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      <div className="suggestions">
-        {sugg.map((s) => (
-          <button key={s} className="chip" onClick={() => send(s)} disabled={busy}>{s}</button>
-        ))}
-      </div>
-
-      <div className="chat-input">
-        {speech.supported && !voice.live && (
-          <button
-            className={`mic ${speech.listening ? 'on' : ''}`}
-            onClick={() => (speech.listening ? speech.stopListening() : speech.listen((t) => send(t)))}
-            title="Dictate (offline fallback)"
-            aria-label={speech.listening ? 'Stop dictating' : 'Dictate your question'}
-            aria-pressed={speech.listening}
-          >
-            {speech.listening ? '◼' : '🎤'}
+      <div className="stage-top">
+        <div className={`stage-status ${avatarState}`} role="status">{statusLine}</div>
+        <div className="stage-top-actions">
+          {speech.speaking && (
+            <button className="chip stop-chip" onClick={speech.stopSpeaking}>◼ Stop voice</button>
+          )}
+          <button className={`chip live-chip ${voice.live ? 'on' : ''}`} onClick={toggleLive}>
+            {voice.live ? '◼ End live' : '🎙 Live voice'}
           </button>
-        )}
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder={t(UI.placeholder, lang)}
-          aria-label={t(UI.placeholder, lang)}
-        />
-        <button className="send" onClick={() => send()} disabled={busy || !input.trim()} aria-label="Send message">➤</button>
+        </div>
+      </div>
+
+      {/* Floating transcript: newest at the bottom, rising and fading to nothing
+          as the conversation moves on. No bubbles — just words on the stage. */}
+      <div className="transcript" role="log" aria-live="polite" aria-label="Conversation with Saarthi">
+        <div className="transcript-inner">
+          {messages.map((m, i) => (
+            <div key={i} className={`floater ${m.role}`}>
+              {m.content && <div className="floater-text"><ReactMarkdown>{m.content}</ReactMarkdown></div>}
+              {m.lead && (
+                <div className="lead-card">
+                  <div className="lead-title">🤝 RM callback booked</div>
+                  <div>{m.lead.product} · Lead {m.lead.id} · Priority {m.lead.priority}</div>
+                  <div className="lead-sub">A certified IDBI Relationship Manager will reach out to you shortly.</div>
+                </div>
+              )}
+              {m.events?.length > 0 && (
+                <div className="events">
+                  {m.events.map((e, j) => (
+                    <span key={j} className="event-tag">⚙ {e.tool.replaceAll('_', ' ')}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          {busy && !messages[messages.length - 1]?.streaming && (
+            <div className="floater assistant">
+              <div className="floater-text typing-dots">
+                {statusText && <span className="typing-status">{statusText}</span>}
+                <span /><span /><span />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="stage-dock">
+        <div className="suggestions">
+          {sugg.map((s) => (
+            <button key={s} className="chip" onClick={() => send(s)} disabled={busy}>{s}</button>
+          ))}
+        </div>
+
+        <div className="chat-input">
+          {speech.supported && !voice.live && (
+            <button
+              className={`mic ${speech.listening ? 'on' : ''}`}
+              onClick={() => (speech.listening ? speech.stopListening() : speech.listen((t) => send(t)))}
+              title="Dictate (offline fallback)"
+              aria-label={speech.listening ? 'Stop dictating' : 'Dictate your question'}
+              aria-pressed={speech.listening}
+            >
+              {speech.listening ? '◼' : '🎤'}
+            </button>
+          )}
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && send()}
+            placeholder={t(UI.placeholder, lang)}
+            aria-label={t(UI.placeholder, lang)}
+          />
+          <button className="send" onClick={() => send()} disabled={busy || !input.trim()} aria-label="Send message">➤</button>
+        </div>
       </div>
     </div>
   )

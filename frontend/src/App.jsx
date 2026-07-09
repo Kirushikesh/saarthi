@@ -257,7 +257,7 @@ function Sidebar() {
         <li><b>👥 Segment-aware advisory</b> — Mass, Mass Affluent, HNI and NRI personas get different playbooks, thresholds and RM routing from the same brain</li>
         <li><b>🔗 Account Aggregator 360°</b> — holdings at other banks/AMCs join the portfolio under consent-based, revocable AA linking (Sahamati-style)</li>
         <li><b>🤝 Proactive lead generation</b> — idle funds and unfundable goals become RM opportunities automatically, not just gated compliance queries</li>
-        <li><b>🧑‍✈️ Avatar advisor</b> — an animated advisor with real audio-driven lip-sync; realtime voice + text in 7 languages (English, हिंदी, தமிழ், తెలుగు, ಕನ್ನಡ, বাংলা, मराठी)</li>
+        <li><b>🧑‍✈️ 3D avatar advisor</b> — a full-screen 3D advisor (WebGL) with real audio-driven lip-sync, idle & talking body motion, and a transcript that floats over the scene; realtime voice + text in 7 languages (English, हिंदी, தமிழ், తెలుగు, ಕನ್ನಡ, বাংলা, मराठी)</li>
         <li><b>🧠 Behavioural analytics</b> — behaviour signals derived from raw transaction narrations feed suitability, not just a profile form</li>
         <li><b>🫀 Proactive heartbeat</b> — a background pulse rescans every portfolio against today's market and reaches out first</li>
         <li><b>🏠 Household mode</b> — couples plan jointly under mutual, revocable, audit-logged consent (DPDP-aligned), with an impartial AI mediator and a monthly household review</li>
