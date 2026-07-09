@@ -286,7 +286,7 @@ AA_PROFILES = {
 # true 360° view; others link live in the UI.
 AA_LINKS: dict[str, dict] = {
     "C003": {"linked_on": str(TODAY - timedelta(days=34)),
-             "purpose": "Wealth aggregation & advisory (AA purpose code 102)",
+             "purpose": "Wealth aggregation & advisory (AA purpose code 101)",
              "valid_till": str(TODAY + timedelta(days=331))},
 }
 AA_LOG = [{"ts": f"{TODAY - timedelta(days=34)}T11:02:00", "actor": "C003",
@@ -321,7 +321,7 @@ def aa_set(cid, link: bool):
         return None
     if link:
         AA_LINKS[cid] = {"linked_on": str(TODAY),
-                         "purpose": "Wealth aggregation & advisory (AA purpose code 102)",
+                         "purpose": "Wealth aggregation & advisory (AA purpose code 101)",
                          "valid_till": str(TODAY + timedelta(days=365))}
     else:
         AA_LINKS.pop(cid, None)
