@@ -29,11 +29,22 @@ INTERVAL_SECONDS = int(os.environ.get("HEARTBEAT_SECONDS", "40"))
 # only if its content (and hence title) changes, e.g. a new day's market move.
 _delivered: set = set()
 
-BEATS = {"count": 0, "pushed": 0}
+BEATS = {"count": 0, "pushed": 0, "opportunity_leads": 0}
 
 
 def beat_once():
-    """One pulse: scan every customer, push at most one fresh insight each."""
+    """One pulse: scan every customer, push at most one fresh insight each.
+    Also runs the opportunity-lead scan — complex/high-value cases (idle
+    funds, underfunded goals) become RM leads even though no regulated
+    product was ever mentioned, per the bank's broad lead-generation ask."""
+    for lead in data.scan_opportunity_leads():
+        BEATS["opportunity_leads"] += 1
+        data.add_notification(
+            lead["customer_id"], "🤝",
+            f"Flagged for your RM: {lead['product']}",
+            "Saarthi spotted this in your finances and set up a review with a "
+            "Relationship Manager — they'll reach out; no action needed.",
+        )
     pushed = []
     for cid in data.CUSTOMERS:
         for n in agents.nudges(cid):

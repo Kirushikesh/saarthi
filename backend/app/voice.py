@@ -65,7 +65,8 @@ def build_voice_agent(cid: str, household_mode: bool) -> Agent:
         if result.get("lead"):
             out["rm_callback"] = (
                 f"Booked: lead {result['lead']['id']} for {result['lead']['product']}, "
-                "an IDBI Relationship Manager will call within 24 hours."
+                "a certified IDBI Relationship Manager will reach out shortly "
+                "(never promise a specific callback time)."
             )
         return out
 
@@ -73,7 +74,7 @@ def build_voice_agent(cid: str, household_mode: bool) -> Agent:
     if household_mode and customer.get("partner_id"):
         partner = data.get_customer(customer["partner_id"])
         household_note = (
-            f"Humsafar mode is ON: you are advising {customer['name'].split()[0]} and "
+            f"Household mode is ON: you are advising {customer['name'].split()[0]} and "
             f"{partner['name'].split()[0]} together as a household."
         )
 

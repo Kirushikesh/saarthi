@@ -23,16 +23,19 @@ from . import analytics, data
 RISK_BAND = {"Conservative": 2, "Moderate": 3, "Moderately Aggressive": 4, "Aggressive": 5}
 PRODUCT_RISK = {"Low": 1, "Low to Moderate": 2, "Moderate": 3, "Moderately High": 4, "High": 5}
 
-# Vanilla non-MF products with their risk level and lock-in (years)
+# Vanilla non-MF products with their risk level, lock-in (years) and hard
+# regulatory eligibility flags (checked deterministically, before scoring).
 VANILLA_PRODUCTS = [
     {"name": "Fixed Deposit (Amrit Mahotsav 444 days)", "risk": 1, "lock_in_years": 1.2, "kind": "deposit"},
     {"name": "Recurring Deposit", "risk": 1, "lock_in_years": 1, "kind": "deposit"},
-    {"name": "Public Provident Fund (PPF)", "risk": 1, "lock_in_years": 15, "kind": "deposit"},
+    {"name": "Public Provident Fund (PPF)", "risk": 1, "lock_in_years": 15, "kind": "deposit",
+     "resident_only": True},
     {"name": "National Pension System (NPS)", "risk": 3, "lock_in_years": 20, "kind": "pension"},
-    {"name": "Sukanya Samriddhi Yojana", "risk": 1, "lock_in_years": 21, "kind": "deposit"},
+    {"name": "Sukanya Samriddhi Yojana", "risk": 1, "lock_in_years": 21, "kind": "deposit",
+     "resident_only": True, "requires_minor_daughter": True},
 ]
 
-MF_LOCK_IN = {"IDBI ELSS Tax Saver Fund": 3}  # years; other schemes are open-ended
+MF_LOCK_IN = {"LIC MF ELSS Tax Saver": 3}  # years; other schemes are open-ended
 
 # Audit trail: every suitability assessment ever made, queryable per customer.
 AUDIT_LOG: list[dict] = []
@@ -44,11 +47,15 @@ def _customer_factors(cid):
     b = analytics.behavioral_profile(c)
     eq = sum(h["current"] for h in p["holdings"]
              if "Equity" in h["asset_class"] or "Hybrid" in h["asset_class"])
+    eq += p["external_market_linked"]  # AA-linked equity at other institutions
     eq_pct = round(eq / p["total_assets"] * 100) if p["total_assets"] else 0
     ideal_eq = max(20, min(70, 100 - c["age"]))
     horizon = max(1, 60 - c["age"])  # years to a normal retirement age
     return {
         "age": c["age"],
+        "segment": c["segment"],
+        "residency": c["residency"],
+        "minor_daughter": c["minor_daughter"],
         "risk_profile": c["risk_profile"],
         "risk_band": RISK_BAND.get(c["risk_profile"], 3),
         "horizon_years": horizon,
@@ -73,6 +80,15 @@ def _candidates():
 def _assess_one(product, f):
     """Score one product against customer factors. Returns (verdict, score, reasons)."""
     reasons, cautions, score = [], [], 100
+
+    # Hard regulatory eligibility — checked before any scoring.
+    if product.get("resident_only") and f["residency"] == "NRI":
+        return "NOT_SUITABLE", 0, [
+            f"Not eligible: NRIs cannot open new {product['name'].split(' (')[0]} accounts "
+            "(residency rule) — an NRE/FCNR deposit or mutual fund route applies instead"]
+    if product.get("requires_minor_daughter") and not f["minor_daughter"]:
+        return "NOT_SUITABLE", 0, [
+            "Not eligible: Sukanya Samriddhi requires a resident girl child under 10 on record"]
 
     gap = product["risk"] - f["risk_band"]
     if gap >= 2:

@@ -18,6 +18,10 @@ export function speakPlain(text, lang = 'en') {
 export function useSpeech(lang) {
   const [listening, setListening] = useState(false)
   const [speaking, setSpeaking] = useState(false)
+  // Mouth-drive level for the avatar (0..1): browser TTS gives no audio
+  // stream to analyse, but fires a boundary event per spoken word — each one
+  // pulses this ref and the avatar decays it, so the mouth moves word-by-word.
+  const levelRef = useRef(0)
   const recRef = useRef(null)
   const supported = typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)
 
@@ -52,18 +56,20 @@ export function useSpeech(lang) {
     u.voice = voices.find((v) => v.lang === target) || voices.find((v) => v.lang.startsWith(target.slice(0, 2))) || null
     u.lang = target
     u.rate = 1.02
-    u.onstart = () => setSpeaking(true)
-    u.onend = () => setSpeaking(false)
-    u.onerror = () => setSpeaking(false)
+    u.onstart = () => { setSpeaking(true); levelRef.current = 0.8 }
+    u.onboundary = () => { levelRef.current = 1 } // word-by-word mouth pulses
+    u.onend = () => { setSpeaking(false); levelRef.current = 0 }
+    u.onerror = () => { setSpeaking(false); levelRef.current = 0 }
     window.speechSynthesis.speak(u)
   }, [lang])
 
   const stopSpeaking = useCallback(() => {
     window.speechSynthesis?.cancel()
     setSpeaking(false)
+    levelRef.current = 0
   }, [])
 
   useEffect(() => () => { window.speechSynthesis?.cancel(); recRef.current?.abort?.() }, [])
 
-  return { supported, listening, speaking, listen, stopListening, speak, stopSpeaking }
+  return { supported, listening, speaking, levelRef, listen, stopListening, speak, stopSpeaking }
 }

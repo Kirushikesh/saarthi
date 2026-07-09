@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import Avatar from './Avatar'
 
-const EMOJI = { C001: '👨‍💻', C002: '👩‍💼', C003: '🧔‍♂️', C004: '👩‍🎨' }
+const EMOJI = { C001: '👨‍💻', C002: '👩‍💼', C003: '🧔‍♂️', C004: '👩‍🎨', C005: '🌏' }
 
 export default function Login({ onSelect }) {
   const [customers, setCustomers] = useState(null)

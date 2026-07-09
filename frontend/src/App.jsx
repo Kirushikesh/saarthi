@@ -4,14 +4,14 @@ import { LANGS } from './i18n'
 import { speakPlain } from './useSpeech'
 import Chat from './components/Chat'
 import Dashboard from './components/Dashboard'
-import Humsafar from './components/Humsafar'
+import Household from './components/Household'
 import Login from './components/Login'
 import RMConsole from './components/RMConsole'
 
 const TABS = [
   { id: 'advisor', label: 'Advisor', icon: '💬' },
   { id: 'dashboard', label: 'Portfolio', icon: '📊' },
-  { id: 'humsafar', label: 'Humsafar', icon: '👫' },
+  { id: 'household', label: 'Household', icon: '🏠' },
   { id: 'rm', label: 'RM Console', icon: '🏦' },
 ]
 
@@ -120,9 +120,9 @@ export default function App() {
           </div>
         </header>
 
-        {customer.joint_account && (tab === 'advisor' || tab === 'humsafar') && (
+        {customer.joint_account && (tab === 'advisor' || tab === 'household') && (
           <div className={`hs-banner ${householdMode ? 'active' : ''}`}>
-            <span>👫 Humsafar mode {householdMode ? 'ON — advising your household' : 'off'}</span>
+            <span>🏠 Household mode {householdMode ? 'ON — advising your household' : 'off'}</span>
             <button onClick={toggleHousehold}>
               {householdMode ? 'Switch to individual' : 'Plan together'}
             </button>
@@ -187,7 +187,7 @@ export default function App() {
             />
           )}
           {tab === 'dashboard' && <Dashboard customer={customer} lang={lang} />}
-          {tab === 'humsafar' && <Humsafar customer={customer} />}
+          {tab === 'household' && <Household customer={customer} />}
           {tab === 'rm' && <RMConsole />}
         </main>
 
@@ -218,9 +218,9 @@ function ConsentModal({ consent, customer, onClose, onGranted }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title">👫 Activate Humsafar mode</div>
+        <div className="modal-title">🏠 Activate Household mode</div>
         <p className="modal-sub">
-          Humsafar mode lets Saarthi advise you and <b>{consent.partner_name}</b> as one household.
+          Household mode lets Saarthi advise you and <b>{consent.partner_name}</b> as one household.
           Under the DPDP Act, this needs <b>mutual, revocable consent</b> from both of you.
         </p>
         <div className="consent-scope">
@@ -233,7 +233,7 @@ function ConsentModal({ consent, customer, onClose, onGranted }) {
             : <>⏳ Waiting for {consent.partner_name}'s consent — they'll get a notification</>}
         </div>
         <button className="consent-btn" onClick={grant} disabled={busy}>
-          {busy ? 'Recording consent…' : 'I consent — activate Humsafar mode'}
+          {busy ? 'Recording consent…' : 'I consent — activate Household mode'}
         </button>
         <div className="consent-fineprint">
           Consent is logged with a timestamp and can be revoked by either partner at any time.
@@ -251,18 +251,17 @@ function Sidebar() {
       <h2>Saarthi <span className="accent">×</span> IDBI Innovate 2026</h2>
       <p className="side-tag">Track 1 · AI-Powered Digital Wealth Management</p>
       <ul>
-        <li><b>🧑‍✈️ Avatar advisor</b> — realtime voice + text in 7 languages (English, हिंदी, தமிழ், తెలుగు, ಕನ್ನಡ, বাংলা, मराठी)</li>
-        <li><b>📈 Market pulse</b> — daily index moves translated into "your funds today" impact</li>
-        <li><b>🔐 Consent-first households</b> — Humsafar mode activates only on mutual, revocable, audit-logged consent (DPDP-aligned)</li>
-        <li><b>📊 360° portfolio</b> — savings, FDs, MFs, NPS, EPF, spends & goals in one view</li>
-        <li><b>🎯 Suitability engine</b> — deterministic product scoring (risk band, horizon, buffer, behaviour) with a SEBI-style advice audit trail</li>
-        <li><b>🧠 Behavioural analytics</b> — spend categories & behaviour signals derived from raw transaction narrations, not pre-labeled data</li>
-        <li><b>🧮 Scenario simulation</b> — "Can I afford it?" answered with EMI + FOIR math</li>
-        <li><b>🧭 Life planning</b> — retirement readiness, tax-saving lens & target-SIP planning, all code-computed</li>
-        <li><b>🫀 Proactive heartbeat</b> — a background pulse scans every portfolio against today's market and reaches out first: 🔔 alerts arrive unprompted</li>
-        <li><b>🛡️ Compliance gate + RM copilot</b> — regulated intents detected in all 7 languages (multilingual patterns + LLM backstop), routed to human RMs as qualified leads with an AI pre-meeting brief the RM just approves</li>
-        <li><b>👫 Humsafar mode</b> — India's first household-level advisory: joint net worth, joint goals & an impartial money mediator, with a monthly "State of our Union" report</li>
-        <li><b>♿ Sugam mode</b> — banking for every customer: larger text & touch targets, high contrast, spoken alerts, screen-reader support, and the advisor switches to simple jargon-free language (RPwD-Act-aligned)</li>
+        <li><b>🛡️ Compliance gate + RM copilot</b> — a regulated intent physically cannot reach the model un-gated: 3-layer detection in all 7 languages (fails closed to a human), routed to RMs as qualified leads with an AI pre-meeting brief the RM approves</li>
+        <li><b>🎯 Suitability engine</b> — deterministic product scoring with hard eligibility rules (e.g. NRIs can't open PPF/SSY) and a SEBI-style advice audit trail: every recommendation has an auditable "why"</li>
+        <li><b>🧮 No hallucinated numbers</b> — EMI/FOIR, goal math, retirement corpus, tax headroom: all computed in code; the AI only narrates</li>
+        <li><b>👥 Segment-aware advisory</b> — Mass, Mass Affluent, HNI and NRI personas get different playbooks, thresholds and RM routing from the same brain</li>
+        <li><b>🔗 Account Aggregator 360°</b> — holdings at other banks/AMCs join the portfolio under consent-based, revocable AA linking (Sahamati-style)</li>
+        <li><b>🤝 Proactive lead generation</b> — idle funds and unfundable goals become RM opportunities automatically, not just gated compliance queries</li>
+        <li><b>🧑‍✈️ Avatar advisor</b> — an animated advisor with real audio-driven lip-sync; realtime voice + text in 7 languages (English, हिंदी, தமிழ், తెలుగు, ಕನ್ನಡ, বাংলা, मराठी)</li>
+        <li><b>🧠 Behavioural analytics</b> — behaviour signals derived from raw transaction narrations feed suitability, not just a profile form</li>
+        <li><b>🫀 Proactive heartbeat</b> — a background pulse rescans every portfolio against today's market and reaches out first</li>
+        <li><b>🏠 Household mode</b> — couples plan jointly under mutual, revocable, audit-logged consent (DPDP-aligned), with an impartial AI mediator and a monthly household review</li>
+        <li><b>♿ Sugam mode</b> — accessibility mode: larger text, high contrast, spoken alerts, simple jargon-free replies (RPwD-Act-aligned)</li>
       </ul>
       <p className="side-note">Synthetic data only · Prototype for IDBI Innovate 2026 · Team FinFusion.AI</p>
     </aside>
