@@ -121,7 +121,7 @@ function New-RuntimeEnvContent {
     $googleKey = [Environment]::GetEnvironmentVariable("GOOGLE_API_KEY")
     $llmModel = [Environment]::GetEnvironmentVariable("LLM_MODEL")
     $liveModel = [Environment]::GetEnvironmentVariable("LIVE_MODEL")
-    $awsRegion = [Environment]::GetEnvironmentVariable("AWS_REGION")
+    $bedrockRegion = [Environment]::GetEnvironmentVariable("BEDROCK_AWS_REGION")
 
     if ([string]::IsNullOrWhiteSpace($llmModel)) {
         $llmModel = "arn:aws:bedrock:us-west-2:329597158967:inference-profile/us.anthropic.claude-sonnet-4-6"
@@ -129,8 +129,8 @@ function New-RuntimeEnvContent {
     if ([string]::IsNullOrWhiteSpace($liveModel)) {
         $liveModel = "gemini-3.1-flash-live-preview"
     }
-    if ([string]::IsNullOrWhiteSpace($awsRegion)) {
-        $awsRegion = "us-west-2"
+    if ([string]::IsNullOrWhiteSpace($bedrockRegion)) {
+        $bedrockRegion = "us-west-2"
     }
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -142,7 +142,7 @@ function New-RuntimeEnvContent {
     }
     $lines.Add("LLM_MODEL=$llmModel")
     $lines.Add("LIVE_MODEL=$liveModel")
-    $lines.Add("AWS_REGION=$awsRegion")
+    $lines.Add("AWS_REGION=$bedrockRegion")
     $lines.Add("PORT=8000")
     return ($lines -join "`n")
 }
@@ -165,7 +165,15 @@ function Send-RemoteCommands([string]$TargetInstanceId, [string[]]$Commands) {
 
     $payloadFile = New-TempFilePath "saarthi-ssm-command.json"
     Set-Content -Path $payloadFile -Value $payload -Encoding ascii
-    $commandId = & $Aws ssm send-command --region $Region --cli-input-json file://$payloadFile --query Command.CommandId --output text
+    $commandResult = Invoke-AllowFailure { & $Aws ssm send-command --region $Region --cli-input-json file://$payloadFile --query Command.CommandId --output text }
+    if ($commandResult.ExitCode -ne 0) {
+        throw "Failed to send SSM command. AWS CLI returned exit code $($commandResult.ExitCode). Error message:`n$($commandResult.Output)"
+    }
+    
+    $commandId = $commandResult.Output.Trim()
+    if ([string]::IsNullOrWhiteSpace($commandId)) {
+        throw "Failed to send SSM command: Received an empty Command ID."
+    }
 
     for ($i = 0; $i -lt 60; $i++) {
         $invocation = & $Aws ssm get-command-invocation --region $Region --command-id $commandId --instance-id $TargetInstanceId --output json | ConvertFrom-Json
