@@ -18,7 +18,7 @@ jobs:
       contents: read
 
     env:
-      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
       ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'saarthi' }}
       EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
