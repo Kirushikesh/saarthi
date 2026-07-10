@@ -33,9 +33,14 @@ def _get_llm(temperature: float = 0.7):
         "LLM_MODEL",
         "arn:aws:bedrock:us-west-2:329597158967:inference-profile/us.anthropic.claude-sonnet-4-6"
     )
+    model_region = os.environ.get("AWS_REGION", "us-west-2")
+    if model_id.startswith("arn:aws:"):
+        parts = model_id.split(":")
+        if len(parts) > 3:
+            model_region = parts[3]
     return ChatBedrockConverse(
         model=model_id,
-        region_name=os.environ.get("AWS_REGION", "us-west-2"),
+        region_name=model_region,
         temperature=temperature,
         provider="anthropic",
     )
