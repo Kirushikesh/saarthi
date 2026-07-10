@@ -106,8 +106,29 @@ Nova Sonic): [docs/integration-architecture.md](docs/integration-architecture.md
 
 ## Deploy
 
-- **Backend → Railway**: point a service at `backend/` (railway.toml included), set `OPENAI_API_KEY` and `GOOGLE_API_KEY`.
-- **Frontend → Vercel**: point a project at `frontend/`, set `VITE_API_URL=https://<railway-app>.up.railway.app`.
+The app is deployed to an **AWS EC2** instance running Docker. The deployment process builds the full-stack Docker image, pushes it to ECR, and deploys it to the EC2 instance using a PowerShell script.
+
+### 1. Local Deployment (via Makefile)
+You can deploy directly from your local terminal using the Makefile targets:
+```powershell
+# Fresh deployment (builds, tags, pushes, and launches on EC2)
+make ec2-deploy ENV_FILE=backend/.env REGION=us-west-2
+
+# In-place update to a running EC2 instance
+make ec2-update ENV_FILE=backend/.env REGION=us-west-2
+```
+
+### 2. CI/CD Deployment (via GitHub Actions)
+A GitHub Actions workflow is configured in [.github/workflows/deploy.yml](.github/workflows/deploy.yml). Any push to the `master` branch will trigger a deployment.
+
+### Required Secrets / Environment Variables
+To deploy and run the Bedrock-only advisor:
+* `AWS_ACCESS_KEY_ID` & `AWS_SECRET_ACCESS_KEY`: Deployment credentials (requires permissions for ECR, SSM, EC2).
+* `AWS_REGION`: The region containing your ECR repository and Bedrock models (defaults to `us-west-2`).
+* `EC2_INSTANCE_ID`: The target AWS EC2 instance ID.
+* `GOOGLE_API_KEY`: Required for the Gemini Live voice companion.
+* `LLM_MODEL`: Bedrock model ID/inference profile ARN (defaults to `arn:aws:bedrock:us-west-2:329597158967:inference-profile/us.anthropic.claude-sonnet-4-6`).
+
 
 ## Demo script (3 minutes)
 
