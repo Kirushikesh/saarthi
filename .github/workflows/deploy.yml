@@ -1,0 +1,59 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-master
+  cancel-in-progress: false
+
+jobs:
+  deploy-ec2:
+    name: Deploy to AWS EC2
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'saarthi' }}
+      EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      LLM_MODEL: ${{ vars.LLM_MODEL || 'google_genai:gemini-2.5-flash' }}
+      LIVE_MODEL: ${{ vars.LIVE_MODEL || 'gemini-3.1-flash-live-preview' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify deployment configuration
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:EC2_INSTANCE_ID)) {
+            throw "Missing required GitHub secret: EC2_INSTANCE_ID"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY) -and [string]::IsNullOrWhiteSpace($env:GOOGLE_API_KEY)) {
+            Write-Warning "Neither OPENAI_API_KEY nor GOOGLE_API_KEY is set. The app may start without model access."
+          }
+
+      - name: Deploy existing EC2 instance
+        shell: pwsh
+        run: |
+          ./scripts/deploy-aws-ec2.ps1 `
+            -Region $env:AWS_REGION `
+            -RepositoryName $env:ECR_REPOSITORY `
+            -ImageTag $env:GITHUB_SHA `
+            -EnvFile "" `
+            -InstanceId $env:EC2_INSTANCE_ID

@@ -3,6 +3,7 @@ param(
     [string]$RepositoryName = "saarthi",
     [string]$InstanceName = "saarthi-hackathon-ec2",
     [string]$InstanceType = "t3.small",
+    [string]$ImageTag = "latest",
     [string]$EnvFile = "backend/.env",
     [string]$InstanceId = "",
     [string]$AccessRoleName = "SaarthiEc2EcrRole",
@@ -103,6 +104,18 @@ function ConvertTo-Base64Text([string]$Text) {
     return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Text))
 }
 
+function New-TempFilePath([string]$FileName) {
+    $tempRoot = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) {
+        $tempRoot = $env:TMPDIR
+    }
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) {
+        $tempRoot = [System.IO.Path]::GetTempPath()
+    }
+
+    return Join-Path $tempRoot $FileName
+}
+
 function New-RuntimeEnvContent {
     $openAiKey = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY")
     $googleKey = [Environment]::GetEnvironmentVariable("GOOGLE_API_KEY")
@@ -145,7 +158,7 @@ function Send-RemoteCommands([string]$TargetInstanceId, [string[]]$Commands) {
         Parameters = @{ commands = $Commands }
     } | ConvertTo-Json -Depth 6 -Compress
 
-    $payloadFile = Join-Path $env:TEMP "saarthi-ssm-command.json"
+    $payloadFile = New-TempFilePath "saarthi-ssm-command.json"
     Set-Content -Path $payloadFile -Value $payload -Encoding ascii
     $commandId = & $Aws ssm send-command --region $Region --cli-input-json file://$payloadFile --query Command.CommandId --output text
 
@@ -167,10 +180,6 @@ $Aws = Resolve-AwsCommand
 Require-Command docker
 Require-AwsIdentity
 Load-EnvFile $EnvFile
-
-if ([string]::IsNullOrWhiteSpace($ImageTag)) {
-    $ImageTag = "latest"
-}
 
 Write-Host "Using AWS region: $Region"
 $AccountId = Get-AwsTextValue { & $Aws sts get-caller-identity --query Account --output text }
@@ -220,7 +229,7 @@ if (-not [string]::IsNullOrWhiteSpace($InstanceId)) {
     exit 0
 }
 
-$RoleTrustFile = Join-Path $env:TEMP "saarthi-ec2-trust-policy.json"
+$RoleTrustFile = New-TempFilePath "saarthi-ec2-trust-policy.json"
 @"
 {
   "Version": "2012-10-17",
@@ -307,7 +316,7 @@ docker run -d --restart unless-stopped --name saarthi-demo --env-file /opt/saart
 '@
 
 $UserData = $UserDataTemplate.Replace("__ENV_B64__", $RuntimeEnvB64).Replace("__REGION__", $Region).Replace("__REGISTRY__", $Registry).Replace("__IMAGE_URI__", $ImageUri)
-$UserDataFile = Join-Path $env:TEMP "saarthi-ec2-user-data.sh"
+$UserDataFile = New-TempFilePath "saarthi-ec2-user-data.sh"
 Set-Content -Path $UserDataFile -Value $UserData -Encoding ascii
 
 Write-Host "Launching EC2 instance: $InstanceName"
