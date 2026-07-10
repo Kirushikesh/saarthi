@@ -52,10 +52,17 @@ one-line change at the API boundary.
 - **Internal holdings:** core banking (balances, FDs, transactions), MF RTA
   feeds (CAMS/KFintech) for scheme holdings and SIP mandates, CRA feeds for NPS/EPF.
 - **External holdings — the AMA's explicit ask** ("investments through other
-  institutions"): the **Account Aggregator framework**. Saarthi's Humsafar
-  consent flow is deliberately modeled on AA consent semantics — purpose-bound,
-  revocable, audit-logged — so extending consent UX from "share with partner"
-  to "fetch via AA" reuses the same pattern the DPDP/AA ecosystem requires.
+  institutions"): the **Account Aggregator framework**. This is *demonstrated
+  in the prototype*, not just described — `data.aa_*` mocks the Sahamati AA
+  rail: pre-consent only institution names are discoverable, and a
+  purpose-bound, revocable, audit-logged consent grant makes external savings,
+  FDs, other-AMC mutual funds and demat equity flow into the same
+  `portfolio_summary` that feeds net worth, the health score, suitability and
+  idle-cash lead detection. The FI-data shape (`fip`, account type, value)
+  mirrors what a live FIU integration delivers, so the swap from mock to real
+  AA is a data-source change behind an unchanged interface. The Household
+  consent flow shares the identical semantics (purpose-bound, revocable,
+  logged).
 - **Behavioural analytics:** the narration classifier + behaviour signals
   (`analytics.py`) run today on raw statement lines — exactly the shape AA
   FI data arrives in.
@@ -70,12 +77,29 @@ one-line change at the API boundary.
 | In-memory stores (leads, notifications, audit trail, consent log) | RDS/PostgreSQL (leads, consent, **advice audit trail** — a compliance record wants a relational, queryable store); DynamoDB for notification feeds |
 | Heartbeat: in-process loop over all customers | EventBridge-scheduled batch over customer **segments** (mass daily, affluent/HNI intraday on market triggers) fanning out to SQS workers |
 
-## 5. Compliance & audit posture
+## 5. Segmentation, lead generation & the RM
+
+- **Segment-differentiated advisory** (the bank's headline ask) is a per-segment
+  playbook injected into the same brain: Mass / Mass Affluent / HNI / NRI get
+  different product emphasis, thresholds, tone and RM-routing. The suitability
+  engine additionally enforces hard eligibility (e.g. NRIs cannot open PPF/SSY)
+  deterministically, so segment is not merely a label in a prompt.
+- **Lead generation is broad, not just compliance exhaust**: alongside the gate
+  (regulated intent → RM), a proactive opportunity scan (in the heartbeat)
+  turns idle funds and unfundable goals into RM leads — the "complex cases →
+  seasoned RM" function the AMA emphasized, triggered even when no regulated
+  product is mentioned. Leads carry a `kind` (`compliance` | `opportunity`) and
+  segment-scaled priority (HNI/NRI → HIGH). In production this scan is an
+  EventBridge batch over CBS/analytics; leads land in the bank's CRM/LMS.
+
+## 6. Compliance & audit posture
 
 - The gate is **middleware, not prompt text**: detection (multilingual
   patterns + LLM backstop) and enforcement (directive injection + deterministic
-  lead fallback) both run outside the model. Benchmarked at 100% catch / 0%
-  false-positive across 7 languages (see performance report).
+  lead fallback) both run outside the model. It **fails closed** — if the LLM
+  classifier errors, the ambiguous query routes to a human rather than dropping
+  protection. See the performance report for held-out vs. development numbers
+  (reported separately; the held-out set is the honest generalization estimate).
 - Every suitability assessment writes a structured audit record — the artifact
   a SEBI/internal-audit review asks for ("why was this product recommended to
   this customer on this date").
@@ -83,7 +107,7 @@ one-line change at the API boundary.
   every grant/revoke is timestamped and audit-logged; revocation cuts access
   instantly.
 
-## 6. What stays exactly as-is
+## 7. What stays exactly as-is
 
 The advisory brain (LangChain `create_agent` + tools + middleware), the
 deterministic calculators, the suitability engine, the behavioural analytics,

@@ -9,7 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -92,6 +92,30 @@ def update_consent(cid: str, req: ConsentRequest):
     return s
 
 
+class AARequest(BaseModel):
+    link: bool
+
+
+@app.get("/api/aa/{cid}")
+def aa_status(cid: str):
+    """Account Aggregator status: discovered institutions pre-consent,
+    full external holdings once linked (mocked Sahamati AA rail)."""
+    s = data.aa_status(cid)
+    if not s:
+        raise HTTPException(404, "customer not found")
+    return s
+
+
+@app.post("/api/aa/{cid}")
+def aa_link(cid: str, req: AARequest):
+    """Grant or revoke AA consent — external holdings appear in / vanish from
+    the 360° portfolio instantly; every action is audit-logged."""
+    s = data.aa_set(cid, req.link)
+    if not s:
+        raise HTTPException(404, "customer not found")
+    return s
+
+
 @app.get("/api/nudges/{cid}")
 def nudges(cid: str):
     if not data.get_customer(cid):
@@ -133,7 +157,7 @@ def health_score(cid: str):
 
 @app.get("/api/report/{cid}")
 def report(cid: str):
-    """'State of our Union' household report (deterministic data + LLM narration)."""
+    """Monthly Household Review (deterministic data + LLM narration)."""
     if not data.get_customer(cid):
         raise HTTPException(404, "customer not found")
     try:
@@ -219,6 +243,25 @@ def chat(req: ChatRequest):
         return agents.chat(req.customer_id, req.message, req.history, req.household_mode, req.sugam_mode)
     except Exception as e:  # surface LLM/config errors readably in the demo UI
         raise HTTPException(502, f"Advisor temporarily unavailable: {e}")
+
+
+@app.post("/api/chat/stream")
+def chat_stream(req: ChatRequest):
+    """SSE variant of /api/chat: tool-status pings and reply tokens stream as
+    they happen, then a final `done` payload identical to /api/chat's."""
+    if not data.get_customer(req.customer_id):
+        raise HTTPException(404, "customer not found")
+
+    def gen():
+        try:
+            for ev in agents.chat_stream(req.customer_id, req.message, req.history,
+                                         req.household_mode, req.sugam_mode):
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Advisor temporarily unavailable: {e}'})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 async def _voice_to_client(ws: WebSocket, events, leads_seen: set):

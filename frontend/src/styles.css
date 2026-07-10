@@ -1,7 +1,7 @@
 /* ============================================================
    Saarthi design system — "heritage private bank, modern India"
    Deep pine + ivory paper + burnished gold; Fraunces for display
-   numerals & headings, Instrument Sans for UI. Humsafar wears
+   numerals & headings, Instrument Sans for UI. Household mode wears
    kumkum rose. All motion honors prefers-reduced-motion.
    ============================================================ */
 
@@ -20,7 +20,7 @@
   /* ink */
   --ink: #22302c;
   --muted: #6d7a72;
-  /* humsafar (kumkum rose, not purple) */
+  /* household (kumkum rose, not purple) */
   --rose: #a23a50;
   --rose-deep: #7e2a3e;
   --rose-soft: #f7e9ea;
@@ -137,7 +137,7 @@ body::before {
 }
 .toggle.on { background: var(--gold); border-color: var(--gold); color: #241a05; }
 
-/* ---------- humsafar banner ---------- */
+/* ---------- household banner ---------- */
 .hs-banner {
   display: flex; align-items: center; justify-content: space-between;
   padding: 9px 14px; font-size: 12px; font-weight: 600;
@@ -187,10 +187,8 @@ body::before {
 .avatar-speaking .avatar-ring { opacity: 1; }
 .avatar-eyes { animation: blink 4.2s infinite; transform-origin: center; }
 @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.08); } }
-.mouth-talk { display: none; transform-origin: 60px 72px; }
-.avatar-speaking .mouth-talk { display: block; animation: talk 0.32s infinite alternate ease-in-out; }
-.avatar-speaking .mouth-idle { display: none; }
-@keyframes talk { from { transform: scaleY(0.35); } to { transform: scaleY(1); } }
+/* mouth is driven at animation-frame rate from real voice loudness (see
+   Avatar.jsx rAF loop) — no CSS keyframe mouth animation anymore */
 .avatar-thinking svg { animation: bob 1.2s infinite ease-in-out; }
 @keyframes bob { 50% { transform: translateY(-3px); } }
 /* head: subtle life at rest, tilt when listening, nod when speaking */
@@ -219,19 +217,31 @@ body::before {
   border: 3px solid var(--gold); animation: pulse 1.2s infinite;
 }
 @keyframes pulse { 0% { transform: scale(0.95); opacity: 1; } 100% { transform: scale(1.18); opacity: 0; } }
+/* sound waves by the ear while listening */
+.listen-waves { opacity: 0; transition: opacity 0.3s; }
+.avatar-listening .listen-waves { opacity: 1; }
+.avatar-listening .listen-waves path { animation: wavepulse 1.1s infinite; }
+.avatar-listening .listen-waves path:nth-child(2) { animation-delay: 0.25s; }
+@keyframes wavepulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 
 /* ---------- chat ---------- */
 .chat { display: flex; flex-direction: column; height: 100%; }
+/* Avatar stage: the advisor is the centerpiece — a figure you talk to,
+   not an icon. Column layout: character, status line, controls. */
 .chat-avatar-strip {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 14px 16px 10px;
   background: linear-gradient(180deg, #ece5d2, var(--bg));
   border-bottom: 1px solid rgba(201, 150, 46, 0.14);
+  position: relative;
 }
 .avatar-status {
-  font-size: 12.5px; font-weight: 600; color: var(--teal-deep); flex: 1;
+  font-size: 12.5px; font-weight: 600; color: var(--teal-deep);
   font-style: italic; font-family: var(--display); letter-spacing: 0.2px;
+  text-align: center; min-height: 17px;
 }
+.chat-avatar-strip .live-chip { position: absolute; top: 12px; right: 12px; }
+.chat-avatar-strip .stop-chip { position: absolute; top: 12px; left: 12px; }
 .stop-chip { background: #fbe3e3 !important; color: #9d2235 !important; border-color: #eab4b4 !important; }
 .live-chip {
   background: linear-gradient(120deg, var(--teal-dark), var(--teal));
@@ -306,6 +316,145 @@ body::before {
 .send { background: linear-gradient(135deg, var(--teal), var(--teal-dark)); color: #f6f2e6; }
 .send:disabled { opacity: 0.4; cursor: default; }
 
+/* ============================================================
+   Immersive advisor stage — full-screen 3D Saarthi with a
+   floating transcript that rises and fades on the same backdrop.
+   ============================================================ */
+.stage {
+  position: relative; height: 100%; overflow: hidden;
+  color: #f4efe0;
+  /* the one backdrop everything floats on: deep pine, warm halo up top */
+  background:
+    radial-gradient(120% 78% at 50% -14%, rgba(20, 168, 154, 0.42), transparent 60%),
+    radial-gradient(120% 70% at 50% 118%, rgba(5, 40, 36, 0.75), transparent 55%),
+    linear-gradient(180deg, #0c453f 0%, #0a322d 52%, #06201d 100%);
+}
+.stage.household {
+  background:
+    radial-gradient(120% 78% at 50% -14%, rgba(162, 58, 80, 0.4), transparent 60%),
+    radial-gradient(120% 70% at 50% 118%, rgba(52, 18, 28, 0.8), transparent 55%),
+    linear-gradient(180deg, #4a1f2b 0%, #34141d 52%, #200a11 100%);
+}
+.stage-scene { position: absolute; inset: 0; z-index: 1; }
+.avatar3d-canvas { width: 100% !important; height: 100% !important; display: block; touch-action: none; }
+
+.stage-top {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 5;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 8px; padding: 12px 12px 0; pointer-events: none;
+}
+.stage-top > * { pointer-events: auto; }
+.stage-status {
+  font-family: var(--display); font-style: italic; font-weight: 600; font-size: 13px;
+  color: #eaf5ef; letter-spacing: 0.2px; max-width: 58%;
+  background: rgba(6, 28, 25, 0.44); backdrop-filter: blur(7px);
+  border: 1px solid rgba(232, 200, 128, 0.22); border-radius: 999px;
+  padding: 6px 13px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+.stage-status.speaking { color: #ffe6a6; }
+.stage-status.thinking { color: #d9ecff; }
+.stage-top-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* ---- floating transcript ---- */
+.transcript {
+  position: absolute; left: 0; right: 0; top: 46%; bottom: 92px; z-index: 3;
+  overflow: hidden; padding: 0 18px; pointer-events: none;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.12) 16%, #000 44%);
+          mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.12) 16%, #000 44%);
+}
+.transcript-inner { display: flex; flex-direction: column; gap: 13px; }
+.floater {
+  display: flex; flex-direction: column;
+  animation: floatUp 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.05) backwards;
+}
+@keyframes floatUp { from { transform: translateY(18px); opacity: 0; } }
+.floater.assistant { align-items: flex-start; }
+.floater.user { align-items: flex-end; }
+.floater-text {
+  font-size: 15px; line-height: 1.5; max-width: 90%;
+  text-shadow: 0 1px 7px rgba(0, 0, 0, 0.7), 0 0 2px rgba(0, 0, 0, 0.55);
+}
+.floater.assistant .floater-text { color: #f6f1e2; }
+.floater.user .floater-text { color: #ffe0a0; font-weight: 600; text-align: right; }
+.floater-text > p { margin: 0; }
+.floater-text > p + p, .floater-text ul, .floater-text ol { margin-top: 5px; }
+.floater-text ul, .floater-text ol { padding-left: 18px; }
+.floater-text strong { color: #ffffff; }
+.floater-text a { color: #ffe0a0; }
+.floater-text table {
+  border-collapse: collapse; font-size: 12px; margin-top: 6px;
+  background: rgba(6, 28, 25, 0.5); border-radius: 8px; overflow: hidden;
+}
+.floater-text th, .floater-text td { border: 1px solid rgba(232, 200, 128, 0.2); padding: 4px 7px; }
+.floater .lead-card {
+  pointer-events: auto; margin-top: 8px; max-width: 92%; padding: 10px 12px;
+  border-radius: 12px; font-size: 12px; color: #fdefc8;
+  background: rgba(124, 84, 16, 0.32); backdrop-filter: blur(6px);
+  border: 1px solid rgba(232, 200, 128, 0.45); border-left: 3px solid var(--gold-soft);
+}
+.floater .lead-title { font-weight: 700; color: #ffe6a6; }
+.floater .lead-sub { color: #f2d69a; margin-top: 2px; }
+.floater .events { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 4px; }
+.floater.user .events { justify-content: flex-end; }
+.floater .event-tag {
+  font-size: 10px; background: rgba(255, 253, 248, 0.14); color: #e9f3ee;
+  border-radius: 999px; padding: 2px 8px; font-weight: 600; letter-spacing: 0.3px;
+}
+.typing-dots { display: inline-flex; align-items: center; gap: 5px; }
+.typing-dots > span:not(.typing-status) {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--gold-soft);
+  animation: dots 1s infinite;
+}
+.typing-dots > span:not(.typing-status):nth-child(3) { animation-delay: 0.2s; }
+.typing-dots > span:not(.typing-status):nth-child(4) { animation-delay: 0.4s; }
+.typing-status { color: #e9dfbf; font-style: italic; font-size: 13px; margin-right: 4px; }
+
+/* ---- bottom dock (suggestions + input) ---- */
+.stage-dock {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
+  padding: 8px 10px 12px;
+  background: linear-gradient(180deg, transparent, rgba(4, 22, 19, 0.55) 34%, rgba(4, 22, 19, 0.85));
+}
+.stage .suggestions { padding: 0 2px 8px; }
+.stage .chip {
+  background: rgba(255, 253, 248, 0.1); color: #f2ecdb;
+  border-color: rgba(232, 200, 128, 0.3); backdrop-filter: blur(4px);
+}
+.stage .chip:hover { background: rgba(255, 253, 248, 0.2); border-color: var(--gold-soft); }
+.stage .live-chip { background: linear-gradient(120deg, var(--teal-dark), var(--teal)); color: #f8f4e8; border: none; }
+.stage .live-chip.on { background: var(--red); }
+.stage .chat-input { background: transparent; border: none; padding: 0 2px; }
+.stage .chat-input input {
+  background: rgba(255, 255, 255, 0.12); border: 1.5px solid rgba(232, 200, 128, 0.3); color: #fff;
+}
+.stage .chat-input input::placeholder { color: rgba(240, 240, 230, 0.6); }
+.stage .chat-input input:focus { border-color: var(--gold-soft); box-shadow: 0 0 0 3px rgba(201, 150, 46, 0.2); }
+.stage .mic { background: rgba(255, 255, 255, 0.14); color: #f2ecdb; }
+
+/* ---- loading veil ---- */
+.stage-loading {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: linear-gradient(180deg, #0c453f, #06201d); color: #e9dfbf;
+}
+.stage-spinner {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 3px solid rgba(232, 200, 128, 0.25); border-top-color: var(--gold-soft);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.stage-loading-text { font-family: var(--display); font-style: italic; font-size: 14px; letter-spacing: 0.3px; }
+
+/* Sugam (accessibility): larger floating text on the stage */
+.phone.sugam .floater-text { font-size: 18px; line-height: 1.6; }
+.phone.sugam .stage-status { font-size: 15px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .floater { animation: none; }
+  .stage-spinner { animation-duration: 1.8s; }
+}
+
 /* ---------- dashboard ---------- */
 .dash { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 /* staggered entrance — one orchestrated reveal per tab load */
@@ -332,7 +481,7 @@ body::before {
   border-radius: 50%; pointer-events: none;
   background: repeating-radial-gradient(circle, transparent 0 16px, rgba(232, 200, 128, 0.12) 16px 17px);
 }
-.networth-card.humsafar-grad {
+.networth-card.household-grad {
   background:
     radial-gradient(240px 140px at 100% 0%, rgba(232, 200, 128, 0.2), transparent 70%),
     linear-gradient(130deg, #6d2536, var(--rose-deep) 70%);
@@ -395,7 +544,7 @@ body::before {
 .goal-head { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 600; }
 .progress { height: 8px; background: #efe9d8; border-radius: 999px; margin: 6px 0 4px; overflow: hidden; }
 .progress div { height: 100%; background: linear-gradient(90deg, var(--teal), #4db08a); border-radius: 999px; }
-.progress.humsafar div { background: linear-gradient(90deg, var(--rose-deep), #cd7484); }
+.progress.household div { background: linear-gradient(90deg, var(--rose-deep), #cd7484); }
 .goal-sub { font-size: 10.5px; color: var(--muted); }
 
 .nudge { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
@@ -471,7 +620,7 @@ body::before {
 .pillar-bar { height: 5px; background: #eae3d0; border-radius: 3px; margin-top: 3px; overflow: hidden; }
 .pillar-bar div { height: 100%; background: linear-gradient(90deg, var(--teal), var(--gold)); border-radius: 3px; }
 
-/* ---------- state of our union report ---------- */
+/* ---------- monthly household review ---------- */
 .report-btn {
   width: 100%; padding: 12px; border: none; border-radius: 12px;
   background: linear-gradient(135deg, var(--rose-deep), var(--rose));
@@ -630,3 +779,22 @@ body::before {
   padding: 6px 4px; max-width: 74px; cursor: pointer; font-family: var(--body);
 }
 .lang-select option { color: #131e1a; }
+
+/* ---------- account aggregator ---------- */
+.aa-cta { border-left: 3px solid var(--gold); }
+.aa-consent-line {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--line);
+  font-size: 11px; color: var(--muted);
+}
+.aa-consent-line .consent-revoke { margin-left: auto; }
+
+/* ---------- lead kind pills ---------- */
+.pill.kind-compliance { background: #e7f0ee; color: var(--teal-dark); }
+.pill.kind-opportunity { background: #fdf3dc; color: #8a6414; }
+
+/* ---------- streamed tool status inside typing bubble ---------- */
+.typing-status {
+  display: block; font-size: 11.5px; font-style: italic; color: var(--muted);
+  margin-bottom: 4px;
+}

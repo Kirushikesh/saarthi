@@ -80,6 +80,47 @@ function BehaviorCard({ behavior }) {
   )
 }
 
+// Account Aggregator: the "holdings at other institutions" ask — external
+// accounts join the 360° only under purpose-bound, revocable AA consent.
+function AACard({ aa, external, onLink, onUnlink, busy }) {
+  if (aa.linked && external) {
+    return (
+      <div className="card">
+        <div className="card-title">🔗 Other Institutions <span className="pill live">via Account Aggregator</span></div>
+        {external.accounts.map((a) => (
+          <div key={a.fip + a.type} className="holding">
+            <div>
+              <div className="h-name">{a.fip}</div>
+              <div className="h-sub">{a.type} · {a.detail}</div>
+            </div>
+            <div className="h-right">
+              <div className="h-val">{inr(a.value)}</div>
+              <div className="h-sub">{a.market_linked ? 'market-linked' : 'deposit/cash'}</div>
+            </div>
+          </div>
+        ))}
+        <div className="aa-consent-line">
+          🔐 Fetched under AA consent ({aa.consent.purpose}) · valid till {aa.consent.valid_till} · revocable anytime
+          <button className="consent-revoke" onClick={onUnlink} disabled={busy}>Revoke</button>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="card aa-cta">
+      <div className="card-title">🔗 Complete your 360° view</div>
+      <p className="muted small">
+        You hold accounts at <b>{aa.discovered.join(', ')}</b>. Link them through the RBI's
+        Account Aggregator framework — consent-based, purpose-bound, revocable — and Saarthi
+        will advise on your <b>full</b> financial picture, not just your IDBI holdings.
+      </p>
+      <button className="report-btn" onClick={onLink} disabled={busy}>
+        {busy ? 'Fetching via AA…' : '🔗 Link via Account Aggregator'}
+      </button>
+    </div>
+  )
+}
+
 function AuditTrailCard({ trail }) {
   return (
     <div className="card">
@@ -109,16 +150,28 @@ export default function Dashboard({ customer, lang }) {
   const [market, setMarket] = useState(null)
   const [behavior, setBehavior] = useState(null)
   const [trail, setTrail] = useState(null)
+  const [aa, setAA] = useState(null)
+  const [aaBusy, setAABusy] = useState(false)
   const [err, setErr] = useState(null)
 
-  useEffect(() => {
-    setP(null)
+  const refresh = () => {
     Promise.all([api.portfolio(customer.id), api.nudges(customer.id), api.healthScore(customer.id), api.market(customer.id)])
       .then(([pf, nd, hs, mk]) => { setP(pf); setNudges(nd); setHealth(hs); setMarket(mk) })
       .catch((e) => setErr(e.message))
+    api.aa(customer.id).then(setAA).catch(() => {})
+  }
+
+  useEffect(() => {
+    setP(null)
+    refresh()
     api.behavior(customer.id).then(setBehavior).catch(() => {})
     api.suitability(customer.id).then((s) => setTrail(s.audit_trail)).catch(() => {})
-  }, [customer.id])
+  }, [customer.id]) // eslint-disable-line
+
+  const setAALink = async (link) => {
+    setAABusy(true)
+    try { await api.aaLink(customer.id, link); refresh() } finally { setAABusy(false) }
+  }
 
   if (err) return <div className="pad error">⚠️ {err}</div>
   if (!p) return <div className="pad muted">Loading portfolio…</div>
@@ -137,8 +190,14 @@ export default function Dashboard({ customer, lang }) {
         <div className="nw-value">{inr(p.net_worth)}</div>
         <div className="nw-sub">
           Assets {inr(p.total_assets)} · Liabilities {inr(p.total_liabilities)} · SIP {inr(p.monthly_sip)}/mo
+          {p.external && <> · incl. {inr(p.external.total)} at other institutions 🔗</>}
         </div>
       </div>
+
+      {aa?.available && (
+        <AACard aa={aa} external={p.external} busy={aaBusy}
+          onLink={() => setAALink(true)} onUnlink={() => setAALink(false)} />
+      )}
 
       {market && <MarketPulse market={market} />}
 
