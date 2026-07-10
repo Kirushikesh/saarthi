@@ -122,6 +122,10 @@ function New-RuntimeEnvContent {
     $llmModel = [Environment]::GetEnvironmentVariable("LLM_MODEL")
     $liveModel = [Environment]::GetEnvironmentVariable("LIVE_MODEL")
     $bedrockRegion = [Environment]::GetEnvironmentVariable("BEDROCK_AWS_REGION")
+    
+    $awsKey = [Environment]::GetEnvironmentVariable("AWS_ACCESS_KEY_ID")
+    $awsSecret = [Environment]::GetEnvironmentVariable("AWS_SECRET_ACCESS_KEY")
+    $awsToken = [Environment]::GetEnvironmentVariable("AWS_SESSION_TOKEN")
 
     if ([string]::IsNullOrWhiteSpace($llmModel)) {
         $llmModel = "arn:aws:bedrock:us-west-2:329597158967:inference-profile/us.anthropic.claude-sonnet-4-6"
@@ -139,6 +143,15 @@ function New-RuntimeEnvContent {
     }
     if (-not [string]::IsNullOrWhiteSpace($googleKey)) {
         $lines.Add("GOOGLE_API_KEY=$googleKey")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($awsKey)) {
+        $lines.Add("AWS_ACCESS_KEY_ID=$awsKey")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($awsSecret)) {
+        $lines.Add("AWS_SECRET_ACCESS_KEY=$awsSecret")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($awsToken)) {
+        $lines.Add("AWS_SESSION_TOKEN=$awsToken")
     }
     $lines.Add("LLM_MODEL=$llmModel")
     $lines.Add("LIVE_MODEL=$liveModel")
