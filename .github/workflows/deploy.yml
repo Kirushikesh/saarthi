@@ -18,12 +18,12 @@ jobs:
       contents: read
 
     env:
-      AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
       ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'saarthi' }}
       EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-      LLM_MODEL: ${{ vars.LLM_MODEL || 'google_genai:gemini-2.5-flash' }}
+      LLM_MODEL: ${{ vars.LLM_MODEL || 'arn:aws:bedrock:us-west-2:329597158967:inference-profile/us.anthropic.claude-sonnet-4-6' }}
       LIVE_MODEL: ${{ vars.LIVE_MODEL || 'gemini-3.1-flash-live-preview' }}
 
     steps:

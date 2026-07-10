@@ -121,12 +121,16 @@ function New-RuntimeEnvContent {
     $googleKey = [Environment]::GetEnvironmentVariable("GOOGLE_API_KEY")
     $llmModel = [Environment]::GetEnvironmentVariable("LLM_MODEL")
     $liveModel = [Environment]::GetEnvironmentVariable("LIVE_MODEL")
+    $awsRegion = [Environment]::GetEnvironmentVariable("AWS_REGION")
 
     if ([string]::IsNullOrWhiteSpace($llmModel)) {
-        $llmModel = "google_genai:gemini-2.5-flash"
+        $llmModel = "arn:aws:bedrock:us-west-2:329597158967:inference-profile/us.anthropic.claude-sonnet-4-6"
     }
     if ([string]::IsNullOrWhiteSpace($liveModel)) {
         $liveModel = "gemini-3.1-flash-live-preview"
+    }
+    if ([string]::IsNullOrWhiteSpace($awsRegion)) {
+        $awsRegion = "us-west-2"
     }
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -138,6 +142,7 @@ function New-RuntimeEnvContent {
     }
     $lines.Add("LLM_MODEL=$llmModel")
     $lines.Add("LIVE_MODEL=$liveModel")
+    $lines.Add("AWS_REGION=$awsRegion")
     $lines.Add("PORT=8000")
     return ($lines -join "`n")
 }

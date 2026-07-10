@@ -19,15 +19,24 @@ from contextvars import ContextVar
 from typing import Callable
 
 from langchain.agents import create_agent
-from langchain.chat_models import init_chat_model
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from langchain.tools import tool
 from langchain_core.messages import AIMessage, SystemMessage
+from langchain_aws import ChatBedrockConverse
 
 from . import data, suitability
 
-_raw_model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-MODEL = _raw_model if ":" in _raw_model else f"openai:{_raw_model}"
+def _get_llm(temperature: float = 0.7):
+    model_id = os.environ.get(
+        "LLM_MODEL",
+        "arn:aws:bedrock:us-west-2:329597158967:inference-profile/us.anthropic.claude-sonnet-4-6"
+    )
+    return ChatBedrockConverse(
+        model=model_id,
+        region_name=os.environ.get("AWS_REGION", "us-west-2"),
+        temperature=temperature,
+        provider="anthropic",
+    )
 
 # Per-request event log (tool calls, gate triggers) — contextvar so concurrent
 # requests don't interleave.
@@ -134,7 +143,7 @@ def _classify_regulated(text: str, context: str = "") -> bool:
         return _gate_cache[key]
     try:
         if _gate_model is None:
-            _gate_model = init_chat_model(MODEL, temperature=0)
+            _gate_model = _get_llm(temperature=0.0)
         out = _gate_model.invoke(GATE_CLASSIFIER_PROMPT.format(
             context=context or "(no prior turns)", msg=text[:600]))
         flag = str(out.content).strip().upper().startswith("REGULATED")
@@ -414,7 +423,7 @@ def get_agent(cid: str, household_mode: bool, sugam_mode: bool = False):
     with customers anyway. Graph construction is a few ms."""
     customer = data.get_customer(cid)
     return create_agent(
-        model=MODEL,
+        model=_get_llm(temperature=0.7),
         tools=_build_tools(cid, household_mode),
         system_prompt=_system_prompt(customer, household_mode, sugam_mode),
         middleware=[ComplianceGateMiddleware()],
@@ -628,7 +637,7 @@ def household_report(cid: str) -> dict:
         "joint_goals": [data.plan_goal(cid, g["name"], household=True) for g in h["joint_goals"]],
         "retirement": data.retirement_projection(cid, household=True),
     }
-    model = init_chat_model(MODEL)
+    model = _get_llm(temperature=0.7)
     reply = model.invoke(REPORT_PROMPT.format(
         month=payload["month"],
         payload=json.dumps(_fmt_money(payload), default=str, ensure_ascii=False),
@@ -672,7 +681,7 @@ def lead_brief(lead_id: str) -> dict:
         "loans": p["loans"], "goals": p["goals"],
         "financial_health": data.financial_health(cid),
     }
-    model = init_chat_model(MODEL)
+    model = _get_llm(temperature=0.7)
     reply = model.invoke(RM_BRIEF_PROMPT.format(
         payload=json.dumps(_fmt_money(payload), default=str, ensure_ascii=False)))
     text = reply.content if isinstance(reply.content, str) else str(reply.content)
