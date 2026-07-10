@@ -29,10 +29,12 @@ from langchain_aws import ChatBedrockConverse
 from . import data, suitability
 
 def _get_llm(temperature: float = 0.7):
-    model_id = os.environ.get(
-        "LLM_MODEL",
-        "arn:aws:bedrock:us-west-2:329597158967:inference-profile/us.anthropic.claude-sonnet-4-6"
-    )
+    model_id = os.environ.get("LLM_MODEL")
+    default_model = "arn:aws:bedrock:us-west-2:329597158967:inference-profile/us.anthropic.claude-sonnet-4-6"
+    
+    if not model_id or not ("bedrock" in model_id.lower() or model_id.startswith("arn:aws:")):
+        model_id = default_model
+
     model_region = os.environ.get("AWS_REGION", "us-west-2")
     if model_id.startswith("arn:aws:"):
         parts = model_id.split(":")
