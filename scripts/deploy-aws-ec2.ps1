@@ -267,10 +267,11 @@ if ([string]::IsNullOrWhiteSpace($RoleArn)) {
         --assume-role-policy-document "file://$RoleTrustFile" `
         --query Role.Arn `
         --output text
-    & $Aws iam attach-role-policy --role-name $AccessRoleName --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
-    & $Aws iam attach-role-policy --role-name $AccessRoleName --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-    Start-Sleep -Seconds 10
 }
+& $Aws iam attach-role-policy --role-name $AccessRoleName --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+& $Aws iam attach-role-policy --role-name $AccessRoleName --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+& $Aws iam attach-role-policy --role-name $AccessRoleName --policy-arn arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+Start-Sleep -Seconds 10
 
 Write-Host "Ensuring instance profile exists: $InstanceProfileName"
 $ProfileCheck = Invoke-AllowFailure { & $Aws iam get-instance-profile --instance-profile-name $InstanceProfileName --query InstanceProfile.Arn --output text }
