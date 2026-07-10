@@ -52,6 +52,48 @@ export const api = {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
     return r.json()
   },
+  aa: (id) => get(`/api/aa/${id}`),
+  aaLink: async (id, link) => {
+    const r = await fetch(`${BASE}/api/aa/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ link }),
+    })
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
+    return r.json()
+  },
+  // Streaming chat (SSE over fetch): onEvent receives {type: 'status'|'token'|'done'|'error', ...}.
+  // Returns the final 'done' payload (same shape as api.chat's response).
+  chatStream: async (body, onEvent) => {
+    const r = await fetch(`${BASE}/api/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText)
+    const reader = r.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let done = null
+    for (;;) {
+      const { value, done: eof } = await reader.read()
+      if (eof) break
+      buf += decoder.decode(value, { stream: true })
+      let idx
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx)
+        buf = buf.slice(idx + 2)
+        const line = frame.split('\n').find((l) => l.startsWith('data: '))
+        if (!line) continue
+        const ev = JSON.parse(line.slice(6))
+        if (ev.type === 'error') throw new Error(ev.message)
+        if (ev.type === 'done') done = ev
+        onEvent?.(ev)
+      }
+    }
+    if (!done) throw new Error('stream ended unexpectedly')
+    return done
+  },
 }
 
 export const inr = (n) => {

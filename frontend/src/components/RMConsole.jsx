@@ -44,9 +44,10 @@ export default function RMConsole() {
       <div className="card">
         <div className="card-title">🏦 RM Lead Console <span className="pill live">LIVE</span></div>
         <p className="muted small">
-          Qualified leads from Saarthi's Compliance &amp; Suitability Gate. For each lead, Saarthi
-          preps the RM with a pre-meeting brief and drafts the customer reply — <b>the RM approves,
-          the AI produces</b>.
+          Qualified leads from two engines: the <b>Compliance Gate</b> (regulated intents routed
+          to a certified human) and <b>proactive opportunity scans</b> (idle funds, unfundable
+          goals — complex cases a seasoned RM should own). For each lead, Saarthi preps the RM
+          with a pre-meeting brief and drafts the customer reply — <b>the RM approves, the AI produces</b>.
         </p>
         {leads.length === 0 && (
           <div className="empty-state small">
@@ -60,6 +61,9 @@ export default function RMConsole() {
             <div key={l.id} className={`lead-row ${l.priority === 'HIGH' ? 'high' : ''}`}>
               <div className="lead-row-head">
                 <b>{l.customer_name}</b>
+                <span className={`pill kind-${l.kind || 'compliance'}`}>
+                  {l.kind === 'opportunity' ? '💡 Opportunity' : '🛡️ Compliance'}
+                </span>
                 <span className={`pill ${l.priority === 'HIGH' ? 'hot' : ''}`}>{l.priority}</span>
               </div>
               <div className="lead-product">{l.product}{l.household ? ' · household query' : ''}</div>

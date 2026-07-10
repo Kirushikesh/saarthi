@@ -22,6 +22,8 @@ MERCHANT_RULES = [
     (("SALARY",), "Income"),
     (("CLIENT PAYMENTS", "FREELANCE"), "Income"),
     (("BUSINESS DRAWINGS",), "Income"),
+    (("INWARD REMITTANCE",), "Income"),
+    (("APARTMENT MAINTENANCE",), "Household"),
     (("SIP AUTO DEBIT", "SIP -"), "SIP Investments"),
     (("RENT",), "Rent"),
     (("LOAN EMI", "MORTGAGE EMI"), "Loan EMI"),

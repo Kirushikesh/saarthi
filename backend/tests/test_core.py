@@ -100,6 +100,18 @@ def test_categorize_known_narrations():
     assert analytics.categorize("UNKNOWN MERCHANT XYZ") == "Other"
 
 
+# ---------------------------------------------------------------- gate failsafe
+def test_backstop_fails_closed_when_llm_unavailable(monkeypatch):
+    # If the LLM classifier errors (API degradation), ambiguous queries must
+    # route to a human RM — fail closed, not open.
+    class Boom:
+        def invoke(self, *_a, **_k):
+            raise RuntimeError("api down")
+    monkeypatch.setattr(agents, "_gate_model", Boom())
+    agents._gate_cache.clear()
+    assert agents.detect_regulated("Which one would be best for someone like me?") == "llm_failsafe"
+
+
 # ---------------------------------------------------------------- behaviour
 def test_behavioral_income_stability():
     assert data.behavior_summary("C001")["income_stability"] == "Stable"       # salaried
@@ -128,6 +140,26 @@ def test_ranking_orders_by_fit():
     assert all(a["reasons"] for a in r["assessments"]), "every verdict must carry reasons"
 
 
+def test_nri_cannot_open_ppf_or_ssy():
+    # Hard regulatory eligibility: C005 is NRI (with a minor daughter — SSY
+    # still blocked because it additionally requires resident status).
+    for product in ("PPF", "Sukanya"):
+        r = suitability.assess("C005", product, via="test")
+        assert r["assessments"][0]["verdict"] == "NOT_SUITABLE", product
+        assert "Not eligible" in r["assessments"][0]["reasons"][0]
+
+
+def test_nri_can_use_nps_and_mf():
+    for product in ("NPS", "Nifty 50"):
+        r = suitability.assess("C005", product, via="test")
+        assert r["assessments"][0]["verdict"] != "NOT_SUITABLE", product
+
+
+def test_ssy_requires_minor_daughter():
+    r = suitability.assess("C001", "Sukanya", via="test")  # resident, no daughter
+    assert r["assessments"][0]["verdict"] == "NOT_SUITABLE"
+
+
 def test_every_assessment_is_audited():
     before = len(suitability.audit_trail("C002", limit=100))
     suitability.assess("C002", "ELSS", via="test")
@@ -150,3 +182,39 @@ def test_health_score_bounds():
         h = data.financial_health(cid)
         assert 0 <= h["score"] <= 100
         assert len(h["pillars"]) == 4
+
+
+# ---------------------------------------------------------------- account aggregator
+def test_aa_consent_gates_external_holdings():
+    # C001 has discoverable accounts but no consent → balances must be hidden.
+    s = data.aa_status("C001")
+    if s["linked"]:  # reset if a previous test linked it
+        data.aa_set("C001", False)
+        s = data.aa_status("C001")
+    assert s["available"] and not s["linked"]
+    assert "accounts" not in s and s["discovered"]
+    assert data.portfolio_summary("C001")["external"] is None
+
+    base_assets = data.portfolio_summary("C001")["total_assets"]
+    data.aa_set("C001", True)
+    p = data.portfolio_summary("C001")
+    assert p["external"]["total"] > 0
+    assert p["total_assets"] == base_assets + p["external"]["total"]
+    assert "Other institutions (via AA)" in p["allocation"]
+
+    data.aa_set("C001", False)  # revocation cuts access instantly
+    assert data.portfolio_summary("C001")["external"] is None
+    assert any(e["action"] == "AA_CONSENT_REVOKE" for e in data.aa_status("C001")["audit_log"])
+
+
+# ---------------------------------------------------------------- opportunity leads
+def test_opportunity_scan_creates_deduped_leads():
+    before = len(data.LEADS)
+    created = data.scan_opportunity_leads()
+    # C003 (HNI, idle cash + underfunded retirement goal) must be among them
+    # unless an earlier scan in this session already flagged him.
+    all_opp = [l for l in data.LEADS if l["kind"] == "opportunity"]
+    assert any(l["customer_id"] == "C003" for l in all_opp)
+    assert all(l["priority"] == "HIGH" for l in all_opp if l["segment"] in ("HNI", "NRI"))
+    assert data.scan_opportunity_leads() == []  # deduped: second scan is a no-op
+    assert len(data.LEADS) == before + len(created)

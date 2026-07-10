@@ -2,63 +2,74 @@
 
 **IDBI Innovate 2026 · Track 1: AI-Powered Digital Wealth Management · Team FinFusion.AI**
 
-Saarthi is an avatar-based, multilingual AI wealth advisor designed to embed inside IDBI Bank's mobile app. It gives every retail liability customer a 360° financial view and goal-based, suitability-aware advisory — and introduces **Humsafar mode**, India's first household-level advisory experience: joint net worth, joint goals, joint affordability simulations and an impartial AI mediator for shared money decisions.
+Every Track 1 entry will demo a multilingual chatbot with an avatar. Saarthi's argument to a bank is different: **it is built so the AI physically cannot do the things a bank must never let an AI do** — and everything it does do is deterministic, auditable and segment-aware.
 
-## Key capabilities
+1. **A regulated intent cannot reach the model un-gated.** The Compliance & Suitability Gate is *middleware, not prompt text* — a 3-layer detector (multilingual keyword fast-path → vanilla allow-list → context-aware LLM backstop that **fails closed to a human**) inspects every turn before the model sees it. If the model still skips the handoff, the RM lead is created deterministically.
+2. **Every recommendation has an auditable "why".** A deterministic suitability engine scores each product against risk band, horizon, surplus, buffer, observed behaviour — plus hard regulatory eligibility (an NRI cannot be sold PPF/SSY; the engine, not the prompt, enforces it). Every assessment lands in a SEBI-style advice audit trail.
+3. **No financial number is hallucinated.** EMI/FOIR, goal math, retirement corpus, tax headroom, SIP targets, fair splits — all computed in code. The LLM narrates; it never computes.
+
+## Built to the bank's brief
+
+What IDBI asked for explicitly (problem statement + AMA), and where Saarthi answers it:
+
+| The bank's ask | Saarthi's answer |
+|---|---|
+| **Customer segmentation** (Mass / Mass Affluent / HNI / NRI) | Five personas across all four segments. The same brain runs a **different playbook per segment**: Mass gets buffer-first simplicity, HNI gets concentration/estate awareness with priority Wealth-RM routing, NRI gets NRE/NRO- and FEMA-aware advice with hard eligibility rules |
+| **Holdings at other institutions** | A mocked **Account Aggregator** rail (Sahamati-style): consent-based, purpose-bound, revocable linking pulls other-bank savings, FDs, external MFs and demat equity into the 360° view — live in the demo, one click to link/revoke |
+| **Lead generation for complex cases** | Two engines: the compliance gate converts regulated intents into qualified leads, and a **proactive opportunity scan** flags idle funds and unfundable goals to RMs — a customer with lakhs idle becomes a lead *without ever asking about insurance* |
+| **Mobile-app integration** | React phone-shell speaking only `/api/*` + `/ws/*` — shaped for a WebView mini-app embed in IDBI GO ([integration path](docs/integration-architecture.md)) |
+| **Frequent market-linked updates** | Daily market pulse translated into personal impact ("your funds today: +₹2,508") + a proactive heartbeat that notifies customers unprompted |
+| **Avatar-based, multilingual** | Animated advisor with **real audio-driven lip-sync** (mouth follows the actual voice amplitude), realtime voice (Gemini Live, barge-in), 7 languages across text and speech |
+
+## Everything in the box
 
 | Capability | What it does |
 |---|---|
-| 🎙️ Realtime voice avatar | Live spoken conversation (Google ADK + Gemini Live, barge-in supported) with an expressive animated advisor — blinks, lip-sync, thinking/listening states |
-| 🌏 7 languages | English, Hindi, Tamil, Telugu, Kannada, Bengali, Marathi — localized UI, agent replies in the customer's language & script, voice follows |
-| 📈 Market pulse | Daily index snapshot translated into personal impact: "Your funds today: +₹2,508" — with a stay-invested nudge |
-| 📊 360° portfolio | Savings, FDs, MFs, NPS, EPF, categorized spends, goals — one dashboard |
-| 🎯 Suitability engine | Deterministic product scoring (risk band, horizon, surplus, emergency buffer, behaviour signals) with per-recommendation reasons — every assessment written to a SEBI-style **advice audit trail** (`GET /api/suitability/{cid}`) |
-| 🧠 Behavioural analytics | Spend categories and behaviour signals (income stability, savings rate, SIP discipline, discretionary share, behavioural segment) **derived from raw transaction narrations** — no pre-labeled data — feeding suitability and advice |
-| 🧮 Scenario simulation | "Can I afford a ₹50L home loan?" → EMI, FOIR, surplus math with a clear verdict |
-| 🧭 Retirement readiness | Projected corpus vs inflation-adjusted need (4% rule) and the exact extra monthly SIP to close the gap — individually or as a couple |
-| 🧾 Tax-saving lens | 80C / 80CCD(1B) utilization computed from actual ELSS SIPs and payroll, with rupee headroom and suggested actions |
-| 📈 Target-SIP planner | "How much monthly to reach ₹50L in 10 years?" → inverse SIP math, checked against the customer's real surplus |
-| ❤️ Financial Health Score | 0–100 score across four pillars (emergency buffer, diversification, debt headroom, goal funding) — gauge on the dashboard, tool for the agent |
-| 🛡️ Compliance & Suitability Gate | Three-layer regulated-intent detector in **all 7 languages** (regulated keyword fast-path → vanilla allow-list short-circuit → context-aware LLM backstop for paraphrase & multi-turn evasions), auto-routing to a human RM as a **qualified lead** — benchmarked at 100% catch (incl. 5/5 multi-turn) / 0% false positives across a 27-attack battery |
-| 👫 Humsafar mode | Linked partners get combined analysis, joint goal planning and a data-driven mediator |
-| 🔐 Consent-first data sharing | Household mode activates only on **mutual, revocable, audit-logged consent** (DPDP-aligned); enforced in the data layer, not the UI |
-| 📏 Evaluation & telemetry | Scripted **93-query benchmark** across 7 languages (incl. multi-turn gate attacks) with a programmatic pass/fail rubric (`scripts/benchmark.py`) + live telemetry at `GET /api/metrics` — see [docs/performance-report.md](docs/performance-report.md) |
-| 📜 State of our Union | One-tap monthly household report: headline, cash flow, both partners' health scores, joint goals with fair splits, retirement check and three actions — deterministic numbers, AI narration |
-| 🫀 Proactive heartbeat | A background pulse (LLM-free, deterministic) rescans every customer's portfolio against today's market and **reaches out first** — 🔔 notifications arrive unprompted: market impact on your funds, allocation gaps, idle surplus, thin emergency buffers, off-track goals, unclaimed tax savings |
-| 📋 RM copilot | For every gated lead, Saarthi preps the RM with an AI pre-meeting brief (profile, ₹ snapshot, suitability signals, talking points) and a drafted customer reply — the **RM approves, the AI produces**; approved messages land in the customer's notification feed |
-| ♿ Sugam mode | Banking for every customer (RPwD Act 2016 / WCAG-aligned): one-tap accessibility mode with larger text & touch targets, high contrast, spoken proactive alerts, tap-to-hear net worth / health score / notifications, screen-reader semantics (ARIA live regions, keyboard focus), reduced-motion support — and the advisor switches to **simple, jargon-free replies** in all 7 languages |
+| 🛡️ Compliance gate + deterministic handoff | 3-layer regulated-intent detection in 7 languages; fails closed; lead creation guaranteed by middleware, not model goodwill |
+| 🎯 Suitability engine + audit trail | Deterministic verdicts (SUITABLE / WITH_CAUTION / NOT_SUITABLE) with reasons + eligibility rules; every assessment recorded (`GET /api/suitability/{cid}`) |
+| 👥 Segment playbooks | Mass / Mass Affluent / HNI / NRI advisory treatment diverges: products, thresholds, tone, RM routing |
+| 🔗 Account Aggregator 360° | External holdings under revocable AA consent; they feed net worth, health score, suitability and idle-cash detection |
+| 🤝 Opportunity leads | Heartbeat scans convert idle funds / unfundable goals into RM leads with priority by segment |
+| 📋 RM copilot | Every lead gets an AI pre-meeting brief + drafted customer reply — the **RM approves, the AI produces** |
+| 🧮 Scenario simulation | "Can I afford a ₹50L home loan?" → EMI, FOIR, surplus math with a verdict |
+| 🧭 Retirement / 🧾 tax / 📈 target-SIP | Corpus projection (4% rule), 80C/80CCD(1B) headroom from actual SIPs & payroll, inverse SIP math — all code-computed |
+| 🧠 Behavioural analytics | Income stability, SIP discipline, discretionary share **derived from raw transaction narrations** — feeds suitability |
+| ❤️ Financial Health Score | 0–100 across four measurable pillars, on the dashboard and as an agent tool |
+| 🫀 Proactive heartbeat | LLM-free background pulse; notifications arrive unprompted (market impact, drift, idle surplus, off-track goals, tax headroom) |
+| 🎙️ Realtime voice avatar | Gemini Live bidirectional audio with barge-in; the animated advisor lip-syncs to playback amplitude from the audio worklet |
+| 🌏 7 languages | English, Hindi, Tamil, Telugu, Kannada, Bengali, Marathi — UI, agent replies, and voice |
+| 🏠 Household mode | Couples plan jointly under **mutual, revocable, audit-logged consent** (DPDP-aligned, enforced in the data layer); impartial mediator for split decisions; one-tap Monthly Household Review |
+| ♿ Sugam mode | Accessibility mode (RPwD Act / WCAG-aligned): larger text/targets, contrast, spoken alerts, simple-language replies |
+| 📏 Evaluation & telemetry | Scripted multilingual benchmark **plus a held-out attack set we did not tune against** (`scripts/benchmark.py --holdout`) + live telemetry at `GET /api/metrics` |
 
 ## Architecture
 
 ```
-Browser (React phone shell, avatar, AudioWorklets)
-   │ REST /api/chat (text)          │ WS /ws/voice/{cid} (16kHz PCM up / 24kHz down)
-   ▼                                ▼
-FastAPI ──────────────────► ADK live session (Gemini Live, barge-in, transcripts)
-   │                                │ ask_saarthi(question)   ← thin voice layer
-   ▼                                ▼
-LangChain create_agent  ◄───────────┘   ← one brain for both channels
-   ├── @tools: portfolio · household view · loan simulation (EMI/FOIR)
-   │           goal planner · target-SIP · retirement projection · tax lens
-   │           financial health score · suitability check (audited) ·
-   │           behavioural profile · product catalog · RM lead
-   ├── ComplianceGateMiddleware (wrap_model_call): 3-layer detector —
-   │   regulated keyword fast-path → vanilla allow-list → context-aware
-   │   LLM backstop → hard handoff directive + deterministic lead fallback
-   ├── Suitability engine (suitability.py): deterministic scoring with
-   │   reasons; every assessment → advice audit trail
-   ├── Behavioural analytics (analytics.py): raw narrations → categories +
-   │   behaviour signals (income stability, SIP discipline, …)
-   ├── Proactive heartbeat (background task): rescans portfolios vs today's
-   │   market on a pulse, pushes notifications — no LLM, pure data math
-   └── Synthetic bank data (round-1 scope) + RM lead queue + notification feed
+Browser (React phone shell, animated avatar w/ amplitude lip-sync, AudioWorklets)
+   │ /api/chat + /api/chat/stream (SSE)   │ WS /ws/voice/{cid} (16kHz up / 24kHz down)
+   ▼                                      ▼
+FastAPI ──────────────────────► ADK live session (Gemini Live, barge-in)
+   │                                      │ ask_saarthi(question)  ← thin voice layer
+   ▼                                      ▼
+LangChain create_agent  ◄─────────────────┘   ← one brain for both channels
+   ├── @tools: portfolio (incl. AA externals) · household view · loan sim
+   │           goal/SIP/retirement/tax math · health score · market pulse ·
+   │           suitability check (audited) · behavioural profile · RM lead
+   ├── ComplianceGateMiddleware (wrap_model_call): 3-layer detector,
+   │   fails closed → hard directive + deterministic lead fallback
+   ├── Segment playbooks: Mass / Mass Affluent / HNI / NRI treatment
+   ├── Suitability engine: deterministic scoring + eligibility rules → audit trail
+   ├── Account Aggregator mock: consent-gated external holdings
+   ├── Behavioural analytics: raw narrations → behaviour signals
+   ├── Proactive heartbeat: market rescan + opportunity-lead scan (no LLM)
+   └── Synthetic bank data (round-1 scope) + RM lead queue + notifications
 ```
 
-- **Brain**: LangChain `create_agent` (v1) — model set by `LLM_MODEL` (OpenAI in the prototype; provider-agnostic via `init_chat_model` strings, so the same agent runs on **Amazon Bedrock** models inside IDBI's AWS landing zone in production).
-- **Voice**: Google ADK drives a bidirectional **Gemini Live** session per connection; the voice agent is deliberately thin and delegates every substantive question to the same LangChain brain — so text and voice share tools, compliance and customer scoping.
-- **Compliance as middleware, not prompts**: the gate inspects each turn before the model sees it; if the model still skips the RM handoff, the lead is created deterministically.
+- **Brain**: LangChain `create_agent` — provider-agnostic via `init_chat_model`, so the same agent runs on **Amazon Bedrock** inside IDBI's AWS landing zone (prototype uses `LLM_MODEL`).
+- **Streaming UX**: `/api/chat/stream` streams tool-status pings and reply tokens (SSE), so the customer watches Saarthi work instead of staring at a spinner.
+- **Voice**: Google ADK drives Gemini Live; the voice agent delegates every substantive question to the same brain — shared tools, compliance, scoping.
 
-> Round-1 note: per the hackathon instructions, all data is **synthetic and self-generated** (4 personas across Mass / Mass Affluent / HNI segments with 12 months of categorized transactions, holdings and joint-account links). No real customer data anywhere.
+> Round-1 note: all data is **synthetic and self-generated** (5 personas across Mass / Mass Affluent / HNI / NRI segments with 12 months of raw transactions, holdings, external AA accounts and joint links). No real customer data anywhere. Product shelf reflects the post-2023 reality: IDBI MF schemes transferred to **LIC MF**, distributed by the bank as an AMFI-registered distributor (regular plans).
 
 ## Run locally
 
@@ -79,14 +90,16 @@ npm run dev        # http://localhost:5173 (proxies /api and /ws to :8000)
 
 ```bash
 cd backend
-uv run pytest tests/                     # 30 LLM-free tests: gate patterns,
-                                         # classifier, suitability, loan math
-uv run python scripts/benchmark.py       # 93-query scripted eval (7 languages,
-                                         # 27 gate attacks incl. multi-turn)
+uv run pytest tests/                       # 45 LLM-free tests: gate layers (incl.
+                                           # fail-closed), suitability + eligibility,
+                                           # AA consent, opportunity leads, loan math
+uv run python scripts/benchmark.py         # scripted multilingual eval (7 languages,
+                                           # incl. multi-turn gate attacks)
+uv run python scripts/benchmark.py --holdout   # held-out attacks we did NOT tune against
 ```
 
-Latest results: 100% gate catch (incl. 5/5 multi-turn), 0% false positives,
-100% language fidelity, 100% intent-tool match —
+Results — the development battery and the held-out set are reported separately
+and honestly (the held-out number is the one to trust):
 [docs/performance-report.md](docs/performance-report.md).
 Bank-stack integration path (IDBI GO embed, auth, Account Aggregator, Bedrock/
 Nova Sonic): [docs/integration-architecture.md](docs/integration-architecture.md).
@@ -119,12 +132,10 @@ To deploy and run the Bedrock-only advisor:
 
 ## Demo script (3 minutes)
 
-1. Sign in as **Rohan** → avatar greets you; ask *"How are my investments doing?"*
-2. Switch language to **हिन्दी**, ask by voice — replies in Hindi, spoken aloud.
-3. Ask *"Can I afford a ₹50 lakh home loan for 20 years?"* → EMI/FOIR simulation; then *"Am I on track for retirement?"* → corpus projection + the exact extra SIP needed.
-4. Ask about **term insurance** → Compliance Gate declines direct advice, books an RM callback → watch it land in the **RM Console** tab. Tap **✨ Prepare with Saarthi** → pre-meeting brief + drafted reply appear; hit **Approve & Send** → the message pops up in the customer's 🔔 feed.
-4a. **Try to break the gate**: ask *"मुझे टर्म इंश्योरेंस के बारे में बताओ"* in Hindi, or *"my uncle's agent suggested a money-back plan, should I take it?"* — both get caught (pattern fast-path and LLM backstop respectively) and routed to the RM. Even a **multi-turn** dodge fails: ask about ULIPs, then a bare *"which of those suits me?"* — the context-aware backstop still gates it. Then ask *"Recommend a mutual fund"* → the reply cites the suitability engine's reasons, and the assessment appears in the Portfolio tab's **Advice Audit Trail**.
-4b. While you talk, the **proactive heartbeat** fires — a 🔔 toast slides in unprompted ("Markets today: your funds +₹2,508").
-5. Tap **Plan together** (Humsafar mode) → *"Can WE afford an ₹80 lakh home loan?"* → joint assessment on combined income; *"How should we split savings for our home goal?"* → impartial mediator plan.
-6. In the **Humsafar** tab, tap **Generate this month's report** → the "State of our Union" household report writes itself.
-7. Show the **Portfolio** tab: Financial Health Score gauge, allocation, holdings, goals, Saarthi Insights nudges.
+1. Sign in as **Rohan** → the animated advisor greets you; ask *"How are my investments doing?"* — the reply **streams live** with tool-status updates.
+2. Portfolio tab → **"Complete your 360°"** → link HDFC + SBI MF via **Account Aggregator** → net worth and health score update instantly; revoke to show consent teeth.
+3. Switch to **हिन्दी**, ask by voice — the avatar **lip-syncs** to her own speech.
+4. Ask *"Can I afford a ₹50 lakh home loan for 20 years?"* → EMI/FOIR simulation; *"Am I on track for retirement?"* → corpus projection + exact extra SIP.
+5. Ask about **term insurance** → the Compliance Gate declines direct advice and routes to an RM → watch the lead land in the **RM Console** (🛡️ Compliance badge) beside 💡 **Opportunity** leads the heartbeat generated on its own (Anil's idle ₹32L). Tap **✨ Prepare with Saarthi** → pre-meeting brief + drafted reply → **Approve & Send** → lands in the customer's 🔔 feed.
+6. Sign in as **Vikram (NRI)** → ask *"Should I open a PPF account?"* → hard eligibility refusal with the regulatory reason; ask about **cross-border tax** → routed to the NRI desk. Same brain, different segment, different treatment.
+7. Close with **Household mode**: Rohan + Priya plan jointly under mutual DPDP consent — *"Can WE afford an ₹80 lakh home loan?"*, fair-split mediation, and the one-tap **Monthly Household Review**.

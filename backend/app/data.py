@@ -12,24 +12,31 @@ random.seed(42)
 
 TODAY = date.today()
 
+# IDBI Mutual Fund's schemes were transferred to LIC Mutual Fund in 2023, so
+# the shelf IDBI Bank distributes today is LIC MF (regular plans, as an
+# AMFI-registered distributor). Production would pull the live multi-AMC shelf.
 MF_SCHEMES = [
-    {"name": "IDBI Nifty 50 Index Fund", "class": "Equity - Large Cap", "risk": "Moderate", "cagr3y": 14.2},
-    {"name": "IDBI Flexi Cap Fund", "class": "Equity - Flexi Cap", "risk": "Moderately High", "cagr3y": 16.8},
-    {"name": "IDBI Midcap Opportunities Fund", "class": "Equity - Mid Cap", "risk": "High", "cagr3y": 21.4},
-    {"name": "IDBI Corporate Bond Fund", "class": "Debt - Corporate Bond", "risk": "Low to Moderate", "cagr3y": 7.1},
-    {"name": "IDBI Balanced Advantage Fund", "class": "Hybrid - Dynamic", "risk": "Moderate", "cagr3y": 11.6},
-    {"name": "IDBI ELSS Tax Saver Fund", "class": "Equity - ELSS", "risk": "Moderately High", "cagr3y": 15.9},
-    {"name": "IDBI Liquid Fund", "class": "Debt - Liquid", "risk": "Low", "cagr3y": 6.4},
+    {"name": "LIC MF Nifty 50 Index Fund", "class": "Equity - Large Cap", "risk": "Moderate", "cagr3y": 14.2},
+    {"name": "LIC MF Flexi Cap Fund", "class": "Equity - Flexi Cap", "risk": "Moderately High", "cagr3y": 16.8},
+    {"name": "LIC MF Midcap Fund", "class": "Equity - Mid Cap", "risk": "High", "cagr3y": 21.4},
+    {"name": "LIC MF Banking & PSU Fund", "class": "Debt - Banking & PSU", "risk": "Low to Moderate", "cagr3y": 7.1},
+    {"name": "LIC MF Balanced Advantage Fund", "class": "Hybrid - Dynamic", "risk": "Moderate", "cagr3y": 11.6},
+    {"name": "LIC MF ELSS Tax Saver", "class": "Equity - ELSS", "risk": "Moderately High", "cagr3y": 15.9},
+    {"name": "LIC MF Liquid Fund", "class": "Debt - Liquid", "risk": "Low", "cagr3y": 6.4},
 ]
 
 PRODUCT_CATALOG = {
+    "distribution_note": (
+        "Mutual funds are distributed by IDBI Bank as an AMFI-registered distributor "
+        "(regular plans); every recommendation is suitability-assessed and audit-logged."
+    ),
     "vanilla": [
         {"product": "Fixed Deposit (Amrit Mahotsav 444 days)", "rate": "7.35% p.a.", "type": "FD"},
         {"product": "Recurring Deposit", "rate": "6.80% p.a.", "type": "RD"},
-        {"product": "Mutual Fund SIPs (direct, execution-only)", "rate": "market linked", "type": "MF"},
-        {"product": "Public Provident Fund (PPF)", "rate": "7.10% p.a.", "type": "PPF"},
+        {"product": "Mutual Fund SIPs (regular plans, LIC MF shelf — AMFI-registered distribution)", "rate": "market linked", "type": "MF"},
+        {"product": "Public Provident Fund (PPF)", "rate": "7.10% p.a.", "type": "PPF", "eligibility": "Residents only — NRIs cannot open new PPF accounts"},
         {"product": "National Pension System (NPS)", "rate": "market linked", "type": "NPS"},
-        {"product": "Sukanya Samriddhi Yojana", "rate": "8.20% p.a.", "type": "SSY"},
+        {"product": "Sukanya Samriddhi Yojana", "rate": "8.20% p.a.", "type": "SSY", "eligibility": "Resident girl child under 10 — NRIs not eligible"},
     ],
     "regulated": [
         {"product": "Term / Life Insurance (LIC, Ageas Federal)", "note": "IRDAI regulated - requires certified advisor"},
@@ -200,7 +207,38 @@ CUSTOMERS = {
             }
         },
     },
+    "C005": {
+        "id": "C005", "name": "Vikram Menon", "age": 38, "gender": "M",
+        "occupation": "Engineering Manager, Dubai", "segment": "NRI",
+        "residency": "NRI", "minor_daughter": True,  # daughter, age 7
+        "risk_profile": "Moderate", "monthly_income": 420000,  # INR remitted to NRE
+        "partner_id": None, "joint_account": False,
+        "savings_balance": 880000,  # NRE savings
+        "fd": [{"amount": 2500000, "rate": 7.35, "maturity": "2027-06-30", "type": "NRE FD (interest tax-free in India)"}],
+        "nps": 180000, "epf": 0,
+        "holdings": _holdings([(0, 25000, 26), (1, 20000, 20)]),
+        "loans": [],
+        "goals": [
+            {"name": "Apartment in Kochi", "target": 9000000, "by": "2029-06", "saved": 3100000, "joint": False},
+            {"name": "Return-to-India corpus", "target": 15000000, "by": "2033-01", "saved": 4200000, "joint": False},
+        ],
+        "spend_profile": {
+            "income_desc": "INWARD REMITTANCE - SALARY (DUBAI)",
+            "spends": {
+                "SIP Investments": (45000, 45000, "SIP AUTO DEBIT - MF"),
+                "Parents Support": (40000, 40000, "IMPS - FAMILY TRANSFER"),
+                "Household": (8000, 15000, "NACH - APARTMENT MAINTENANCE KOCHI"),
+                "Travel": (5000, 40000, "MAKEMYTRIP/CARD - INDIA TRIPS"),
+                "Utilities & Bills": (2000, 4000, "BILLDESK - MOBILE/OTT"),
+            }
+        },
+    },
 }
+
+# Residency / dependant defaults (suitability eligibility rules read these).
+for _c in CUSTOMERS.values():
+    _c.setdefault("residency", "Resident")
+    _c.setdefault("minor_daughter", False)
 
 # Pre-generate raw transactions once (deterministic via seed), then run the
 # narration classifier over them — categories are DERIVED, not authored.
@@ -220,6 +258,93 @@ def behavior_summary(cid):
     out = analytics.behavioral_profile(c)
     out["classifier_coverage"] = CLASSIFIER_STATS[cid]
     return out
+
+# ------------------------------------------------------------ Account Aggregator
+# Mocked AA (Sahamati framework) rail: holdings the customer keeps at OTHER
+# institutions, fetched only under purpose-bound, revocable AA consent — the
+# AMA's explicit "investments through other institutions" ask. In production
+# this is a real AA FIU integration; the data shape below mirrors what FI
+# data delivers (institution, account type, value).
+AA_PROFILES = {
+    "C001": [
+        {"fip": "HDFC Bank", "type": "Savings Account", "value": 230000, "detail": "A/c ····4821"},
+        {"fip": "SBI Mutual Fund (via CAMS)", "type": "Mutual Funds", "value": 410000,
+         "detail": "2 schemes · SIP ₹7,000/mo", "market_linked": True},
+    ],
+    "C003": [
+        {"fip": "Axis Bank", "type": "Fixed Deposits", "value": 4000000, "detail": "2 FDs @ ~7.2% p.a."},
+        {"fip": "HDFC Bank", "type": "Savings Account", "value": 1350000, "detail": "A/c ····0417"},
+        {"fip": "NSDL Demat (broker)", "type": "Direct Equity", "value": 2800000,
+         "detail": "11 listed stocks", "market_linked": True},
+    ],
+    "C005": [
+        {"fip": "Federal Bank", "type": "NRE Savings", "value": 540000, "detail": "A/c ····9932"},
+    ],
+}
+
+# Active AA consents. Anil (C003) is pre-linked so the HNI demo opens with a
+# true 360° view; others link live in the UI.
+AA_LINKS: dict[str, dict] = {
+    "C003": {"linked_on": str(TODAY - timedelta(days=34)),
+             "purpose": "Wealth aggregation & advisory (AA purpose code 101)",
+             "valid_till": str(TODAY + timedelta(days=331))},
+}
+AA_LOG = [{"ts": f"{TODAY - timedelta(days=34)}T11:02:00", "actor": "C003",
+           "action": "AA_CONSENT_GRANT", "channel": "IDBI Mobile"}]
+
+
+def aa_status(cid):
+    c = get_customer(cid)
+    if not c:
+        return None
+    accounts = AA_PROFILES.get(cid, [])
+    linked = cid in AA_LINKS
+    out = {
+        "customer_id": cid,
+        "available": bool(accounts),  # discoverable accounts exist at other FIPs
+        "linked": linked,
+        "consent": AA_LINKS.get(cid),
+        "audit_log": [e for e in AA_LOG if e["actor"] == cid],
+    }
+    if linked:
+        out["accounts"] = accounts
+        out["external_total"] = sum(a["value"] for a in accounts)
+    else:
+        # pre-consent: only institution names are discoverable, never balances
+        out["discovered"] = sorted({a["fip"] for a in accounts})
+    return out
+
+
+def aa_set(cid, link: bool):
+    from datetime import datetime
+    if not get_customer(cid):
+        return None
+    if link:
+        AA_LINKS[cid] = {"linked_on": str(TODAY),
+                         "purpose": "Wealth aggregation & advisory (AA purpose code 101)",
+                         "valid_till": str(TODAY + timedelta(days=365))}
+    else:
+        AA_LINKS.pop(cid, None)
+    AA_LOG.append({"ts": datetime.now().isoformat(timespec="seconds"), "actor": cid,
+                   "action": "AA_CONSENT_GRANT" if link else "AA_CONSENT_REVOKE",
+                   "channel": "IDBI Mobile"})
+    return aa_status(cid)
+
+
+def external_summary(cid):
+    """External holdings for portfolio math — only under active AA consent."""
+    if cid not in AA_LINKS:
+        return None
+    accounts = AA_PROFILES.get(cid, [])
+    return {
+        "accounts": accounts,
+        "total": sum(a["value"] for a in accounts),
+        "market_linked": sum(a["value"] for a in accounts if a.get("market_linked")),
+        "cash_like": sum(a["value"] for a in accounts
+                         if not a.get("market_linked") and "Deposit" not in a["type"]),
+        "via": "Account Aggregator (Sahamati framework) — consent-based, revocable",
+    }
+
 
 # In-memory RM lead queue (prototype scope; RDS/DynamoDB in production architecture)
 LEADS = []
@@ -258,7 +383,7 @@ def mark_notifications_read(cid):
 def get_lead(lead_id):
     return next((l for l in LEADS if l["id"] == lead_id), None)
 
-# DPDP-style consent registry for Humsafar (household) mode. Household data is
+# DPDP-style consent registry for Household mode. Household data is
 # shared only while BOTH partners hold an active grant; every grant/revoke is
 # audit-logged. Priya's grant is seeded as if given from her own device.
 CONSENTS = {"C002": {"granted_to": "C001", "on": str(TODAY - timedelta(days=12))}}
@@ -340,14 +465,22 @@ def portfolio_summary(cid):
     fd_total = sum(f["amount"] for f in c["fd"])
     assets = c["savings_balance"] + mf_current + fd_total + c["nps"] + c["epf"]
     liabilities = sum(l["outstanding"] for l in c["loans"])
+    ext = external_summary(cid)  # other-institution holdings, via AA consent
+    if ext:
+        assets += ext["total"]
+    allocation = {
+        "Savings": c["savings_balance"], "Fixed Deposits": fd_total,
+        "Mutual Funds": mf_current, "NPS": c["nps"], "EPF": c["epf"],
+    }
+    if ext:
+        allocation["Other institutions (via AA)"] = ext["total"]
     return {
         "customer": {k: c[k] for k in ("id", "name", "age", "occupation", "segment", "risk_profile", "monthly_income", "joint_account", "partner_id")},
         "net_worth": assets - liabilities,
         "total_assets": assets, "total_liabilities": liabilities,
-        "allocation": {
-            "Savings": c["savings_balance"], "Fixed Deposits": fd_total,
-            "Mutual Funds": mf_current, "NPS": c["nps"], "EPF": c["epf"],
-        },
+        "allocation": allocation,
+        "external": ext,  # None until the customer links via Account Aggregator
+        "external_market_linked": ext["market_linked"] if ext else 0,
         "holdings": c["holdings"], "fd": c["fd"], "loans": c["loans"], "goals": c["goals"],
         "mf_invested": mf_invested, "mf_current": mf_current,
         "monthly_sip": sum(h["sip_monthly"] for h in c["holdings"]),
@@ -463,7 +596,7 @@ def _market_today():
         "Equity - Large Cap": nifty_1d, "Equity - Flexi Cap": round((nifty_1d + mid) / 2, 2),
         "Equity - Mid Cap": mid, "Equity - ELSS": round(nifty_1d * 1.1, 2),
         "Hybrid - Dynamic": round(nifty_1d * 0.6, 2),
-        "Debt - Corporate Bond": 0.03, "Debt - Liquid": 0.02,
+        "Debt - Banking & PSU": 0.03, "Debt - Liquid": 0.02,
     }
     return indices, class_moves
 
@@ -588,7 +721,7 @@ def tax_summary(cid):
         "marginal_slab_pct": slab,
         "potential_annual_tax_saving": potential_saving,
         "suggested_actions": [a for a in [
-            f"Invest ₹{headroom_80c:,} more in IDBI ELSS Tax Saver Fund to max out 80C" if headroom_80c > 0 else None,
+            f"Invest ₹{headroom_80c:,} more in LIC MF ELSS Tax Saver to max out 80C" if headroom_80c > 0 else None,
             "Open NPS and claim the extra ₹50,000 deduction under 80CCD(1B)" if headroom_80ccd1b > 0 else None,
         ] if a],
     }
@@ -603,8 +736,10 @@ def financial_health(cid):
     months = c["savings_balance"] / max(p["avg_monthly_expenses"], 1)
     s_emergency = round(min(months / 6, 1) * 25)
 
-    # 2. Diversification: equity share vs age-appropriate ideal (100 - age)
+    # 2. Diversification: equity share vs age-appropriate ideal (100 - age).
+    # External market-linked holdings (via AA) count toward equity exposure.
     eq = sum(h["current"] for h in p["holdings"] if "Equity" in h["asset_class"] or "Hybrid" in h["asset_class"])
+    eq += p["external_market_linked"]
     eq_pct = eq / p["total_assets"] * 100 if p["total_assets"] else 0
     ideal = max(20, min(70, 100 - c["age"]))
     s_divers = round(max(0, 1 - abs(eq_pct - ideal) / ideal) * 25)
@@ -636,16 +771,61 @@ def financial_health(cid):
     }
 
 
-def create_lead(cid, product, context, household=False):
+def create_lead(cid, product, context, household=False, kind="compliance"):
+    """RM lead. kind='compliance' → gated regulated intent; kind='opportunity'
+    → Saarthi spotted a complex/high-value case that deserves a human RM."""
     c = get_customer(cid)
     lead = {
         "id": f"L{len(LEADS) + 1:03d}",
         "created": str(TODAY),
         "customer_id": cid, "customer_name": c["name"] if c else cid,
         "segment": c["segment"] if c else "-",
-        "product": product, "context": context,
+        "product": product, "context": context, "kind": kind,
         "household": household, "status": "NEW",
-        "priority": "HIGH" if c and c["segment"] == "HNI" else "NORMAL",
+        "priority": "HIGH" if c and c["segment"] in ("HNI", "NRI") else "NORMAL",
     }
     LEADS.append(lead)
     return lead
+
+
+# ---------------------------------------------------------- opportunity leads
+# The bank framed lead generation broadly: complex or high-value cases should
+# reach a seasoned RM even when no regulated product was ever mentioned. This
+# scan (run by the proactive heartbeat) turns two such signals into leads:
+#   1. idle money — savings (incl. AA-visible cash at other banks) far beyond
+#      the emergency buffer, with a segment-scaled threshold;
+#   2. a goal whose required monthly saving is far beyond the observed surplus
+#      — a planning conversation an algorithm shouldn't finish alone.
+_OPP_SEEN: set = set()
+
+
+def scan_opportunity_leads():
+    created = []
+    for cid, c in CUSTOMERS.items():
+        p = portfolio_summary(cid)
+        ext = p["external"]
+        idle_cash = c["savings_balance"] + (ext["cash_like"] if ext else 0)
+        buffer_needed = 6 * p["avg_monthly_expenses"]
+        threshold = 2000000 if c["segment"] in ("HNI", "NRI") else 500000
+        idle = idle_cash - buffer_needed
+        if idle > threshold and (cid, "idle") not in _OPP_SEEN:
+            _OPP_SEEN.add((cid, "idle"))
+            src = " (incl. balances at other banks, visible via Account Aggregator)" if ext else ""
+            created.append(create_lead(
+                cid, "Investment review — idle funds",
+                f"₹{idle:,.0f} sitting in savings{src} beyond a 6-month emergency buffer. "
+                f"Segment: {c['segment']}. Proactive review of deployment options.",
+                kind="opportunity"))
+        surplus = c["monthly_income"] - p["avg_monthly_expenses"] - p["monthly_sip"]
+        for g in c["goals"]:
+            plan = plan_goal(cid, g["name"])
+            req = plan.get("required_monthly_saving", 0)
+            if req > max(surplus, 0) * 1.5 and req > 0 and (cid, "goal") not in _OPP_SEEN:
+                _OPP_SEEN.add((cid, "goal"))  # one goal-planning lead per customer
+                created.append(create_lead(
+                    cid, f"Goal planning review — {g['name']}",
+                    f"Goal needs ₹{req:,}/month but observed surplus is ₹{surplus:,}/month. "
+                    "Timeline, target or funding mix needs a human planning conversation.",
+                    kind="opportunity"))
+                break  # at most one goal lead per customer
+    return created

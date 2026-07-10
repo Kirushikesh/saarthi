@@ -42,6 +42,10 @@ export function useVoiceSession({ onTranscript, onLead }) {
   const [speaking, setSpeaking] = useState(false)  // model audio playing
   const [thinking, setThinking] = useState(false)  // brain tool in flight
   const [error, setError] = useState(null)
+  // Realtime playback loudness (0..1), reported by the player worklet as the
+  // audio actually plays — drives the avatar's lip-sync. A ref, not state, so
+  // the avatar can read it at animation-frame rate without re-rendering React.
+  const levelRef = useRef(0)
 
   const wsRef = useRef(null)
   const micCtxRef = useRef(null)
@@ -62,6 +66,7 @@ export function useVoiceSession({ onTranscript, onLead }) {
     clearTimeout(speakTimerRef.current)
     wsRef.current = micCtxRef.current = playCtxRef.current = null
     playerRef.current = recorderRef.current = streamRef.current = null
+    levelRef.current = 0
     setLive(false); setSpeaking(false); setThinking(false)
   }, [])
 
@@ -85,6 +90,17 @@ export function useVoiceSession({ onTranscript, onLead }) {
         await playCtx.audioWorklet.addModule('/pcm-player-processor.js')
         const player = new AudioWorkletNode(playCtx, 'pcm-player-processor')
         player.connect(playCtx.destination)
+        // Lip-sync + accurate speaking state from real playback loudness.
+        player.port.onmessage = (e) => {
+          if (e.data?.type !== 'level') return
+          levelRef.current = Math.min(1, e.data.value * 6)
+          if (e.data.value > 0.004) {
+            setSpeaking(true)
+            setThinking(false)
+            clearTimeout(speakTimerRef.current)
+            speakTimerRef.current = setTimeout(() => setSpeaking(false), 500)
+          }
+        }
         playCtxRef.current = playCtx
         playerRef.current = player
 
@@ -117,13 +133,11 @@ export function useVoiceSession({ onTranscript, onLead }) {
       if (msg.type === 'audio') {
         const pcm = new Int16Array(base64ToArrayBuffer(msg.data))
         playerRef.current?.port.postMessage(pcm16ToFloat(pcm))
-        setSpeaking(true)
-        setThinking(false)
-        // Audio arrives in bursts; fall back to idle shortly after the last chunk.
-        clearTimeout(speakTimerRef.current)
-        speakTimerRef.current = setTimeout(() => setSpeaking(false), 900)
+        // speaking/level state comes from the player worklet as the audio
+        // actually plays (see player.port.onmessage), not from chunk arrival.
       } else if (msg.type === 'interrupted') {
         playerRef.current?.port.postMessage('clear')
+        levelRef.current = 0
         setSpeaking(false)
       } else if (msg.type === 'transcript') {
         cbRef.current.onTranscript?.(msg.who, msg.text)
@@ -140,5 +154,5 @@ export function useVoiceSession({ onTranscript, onLead }) {
 
   useEffect(() => stop, [stop])
 
-  return { live, speaking, thinking, error, start, stop }
+  return { live, speaking, thinking, error, levelRef, start, stop }
 }
