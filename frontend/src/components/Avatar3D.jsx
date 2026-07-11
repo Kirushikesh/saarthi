@@ -44,8 +44,10 @@ function SaarthiModel({ state, levelRef }) {
   }, [scene])
 
   // Re-style the stock avatar into "Saarthi, IDBI wealth advisor": natural dark
-  // hair and a professional teal blazer instead of the lavender-hair /
-  // leather-jacket default. Material tints multiply the baked textures.
+  // hair and a traditional Indian silk saree instead of the lavender-hair /
+  // leather-jacket default. The outfit's baked base-colour map is near-black,
+  // so tinting it just stays muddy — we null the map and drive a rich silk
+  // colour directly, keeping the normal map for the fabric folds/sheen.
   useEffect(() => {
     scene.traverse((o) => {
       if (!o.isMesh || !o.material) return
@@ -54,17 +56,25 @@ function SaarthiModel({ state, levelRef }) {
         o.material.roughness = 0.9
       }
       if (o.name === 'Wolf3D_Outfit_Top') {
-        // Kill the glossy "leather" highlights → matte blazer, with a faint teal.
-        o.material.color.set('#1c534c')
-        o.material.roughness = 1.0
+        // Saree pallu / blouse — IDBI teal silk with a gold zari sheen. Only
+        // the neckline and shoulders show in this head-and-shoulders framing.
+        // Low roughness lets the scene's warm rim light throw golden silk
+        // highlights; the faint gold emissive warms the folds in shadow.
+        o.material.map = null
+        o.material.color.set('#128a78')
+        o.material.emissive.set('#3a2a08')
+        o.material.roughness = 0.38
         o.material.metalness = 0.0
         o.material.roughnessMap = null
         o.material.metalnessMap = null
         o.material.needsUpdate = true
       }
       if (o.name === 'Wolf3D_Outfit_Bottom') {
-        o.material.color.set('#123b39')
-        o.material.roughness = 1.0
+        // Saree drape lower — a shade deeper than the pallu.
+        o.material.map = null
+        o.material.color.set('#0c5f54')
+        o.material.emissive.set('#2a1e06')
+        o.material.roughness = 0.4
         o.material.metalness = 0.0
         o.material.roughnessMap = null
         o.material.metalnessMap = null
