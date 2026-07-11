@@ -15,14 +15,22 @@ const TABS = [
   { id: 'rm', label: 'RM Console', icon: '🏦' },
 ]
 
+// Reader-friendly text-size options for the conversation. `glyph` sizes the
+// "A" on each button so the control itself previews the size it applies.
+const TEXT_SIZES = [
+  { id: 'sm', label: 'Small', glyph: 10 },
+  { id: 'md', label: 'Medium', glyph: 12.5 },
+  { id: 'lg', label: 'Large', glyph: 15 },
+  { id: 'xl', label: 'Extra large', glyph: 18 },
+]
+
 export default function App() {
   const [customer, setCustomer] = useState(null)
   const [tab, setTab] = useState('advisor')
   const [lang, setLang] = useState('en')
-  const [voiceOn, setVoiceOn] = useState(true)
-  // Sugam mode = accessibility mode: larger type, higher contrast, bigger
-  // touch targets, and the agent replies in simple jargon-free language.
-  const [sugam, setSugam] = useState(() => localStorage.getItem('sugam') === '1')
+  // Conversation text size — reader preference, persisted. Drives the font size
+  // of the floating transcript so anyone can scale the reply text up or down.
+  const [textScale, setTextScale] = useState(() => localStorage.getItem('textScale') || 'md')
   const [householdMode, setHouseholdMode] = useState(false)
   const [leadFlash, setLeadFlash] = useState(false)
   const [consent, setConsent] = useState(null) // consent status when modal is open
@@ -47,8 +55,6 @@ export default function App() {
         if (fresh.length > 0) {
           setToast(fresh[0])
           setTimeout(() => setToast(null), 6000)
-          // Sugam mode: proactive alerts are spoken, not just shown
-          if (localStorage.getItem('sugam') === '1') speakPlain(fresh[0].title)
         }
       } catch { /* backend not up yet */ }
     }
@@ -57,10 +63,9 @@ export default function App() {
     return () => clearInterval(timer)
   }, [customer])
 
-  const toggleSugam = () => {
-    const next = !sugam
-    setSugam(next)
-    localStorage.setItem('sugam', next ? '1' : '0')
+  const changeTextScale = (id) => {
+    setTextScale(id)
+    localStorage.setItem('textScale', id)
   }
 
   const openNotifs = async () => {
@@ -83,7 +88,7 @@ export default function App() {
   if (!customer) {
     return (
       <div className="shell">
-        <div className={`phone ${sugam ? 'sugam' : ''}`}>
+        <div className="phone">
           <Login onSelect={(c) => { setCustomer(c); setHouseholdMode(false); setTab('advisor') }} />
         </div>
         <Sidebar />
@@ -93,7 +98,7 @@ export default function App() {
 
   return (
     <div className="shell">
-      <div className={`phone ${sugam ? 'sugam' : ''}`}>
+      <div className="phone">
         <header className="appbar">
           <button className="back" onClick={() => setCustomer(null)} aria-label="Sign out and go back">‹</button>
           <div className="appbar-title">
@@ -101,22 +106,22 @@ export default function App() {
             <span className="appbar-sub">IDBI Mobile · {customer.name.split(' ')[0]}</span>
           </div>
           <div className="appbar-actions">
-            <button className="toggle bell" onClick={openNotifs} title="Saarthi noticed"
+            <button className="bell" onClick={openNotifs} title="Saarthi noticed"
               aria-label={`Notifications, ${notifs.unread} unread`}>
               🔔{notifs.unread > 0 && <span className="bell-badge" aria-hidden="true">{notifs.unread}</span>}
             </button>
             <select className="lang-select" value={lang} onChange={(e) => setLang(e.target.value)} title="Language" aria-label="Language">
               {LANGS.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
             </select>
-            <button className={`toggle ${sugam ? 'on' : ''}`} onClick={toggleSugam}
-              title="Sugam mode — larger text, high contrast, simple language"
-              aria-label="Sugam accessibility mode" aria-pressed={sugam}>
-              ♿
-            </button>
-            <button className={`toggle ${voiceOn ? 'on' : ''}`} onClick={() => setVoiceOn(!voiceOn)}
-              title="Voice replies" aria-label="Spoken replies" aria-pressed={voiceOn}>
-              {voiceOn ? '🔊' : '🔇'}
-            </button>
+            <div className="textsize" role="group" aria-label="Conversation text size">
+              {TEXT_SIZES.map((s) => (
+                <button key={s.id} className={`ts-btn ${textScale === s.id ? 'on' : ''}`}
+                  style={{ fontSize: `${s.glyph}px` }} onClick={() => changeTextScale(s.id)}
+                  aria-pressed={textScale === s.id} aria-label={`Text size: ${s.label}`} title={`${s.label} text`}>
+                  A
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 
@@ -181,8 +186,7 @@ export default function App() {
               customer={customer}
               householdMode={householdMode}
               lang={lang}
-              voiceOn={voiceOn}
-              sugam={sugam}
+              textScale={textScale}
               onLead={() => { setLeadFlash(true); setTimeout(() => setLeadFlash(false), 4000) }}
             />
           )}
@@ -261,7 +265,7 @@ function Sidebar() {
         <li><b>🧠 Behavioural analytics</b> — behaviour signals derived from raw transaction narrations feed suitability, not just a profile form</li>
         <li><b>🫀 Proactive heartbeat</b> — a background pulse rescans every portfolio against today's market and reaches out first</li>
         <li><b>🏠 Household mode</b> — couples plan jointly under mutual, revocable, audit-logged consent (DPDP-aligned), with an impartial AI mediator and a monthly household review</li>
-        <li><b>♿ Sugam mode</b> — accessibility mode: larger text, high contrast, spoken alerts, simple jargon-free replies (RPwD-Act-aligned)</li>
+        <li><b>🔤 Adjustable text size</b> — four one-tap reading sizes scale the whole conversation up or down, so every customer can read comfortably (accessibility, RPwD-Act-aligned)</li>
       </ul>
       <p className="side-note">Synthetic data only · Prototype for IDBI Innovate 2026 · Team FinFusion.AI</p>
     </aside>

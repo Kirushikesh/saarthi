@@ -25,14 +25,21 @@ const TOOL_STATUS = {
   create_rm_lead: 'Arranging your Relationship Manager…',
 }
 
-export default function Chat({ customer, householdMode, lang, voiceOn, sugam, onLead }) {
+export default function Chat({ customer, householdMode, lang, textScale = 'md', onLead }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [statusText, setStatusText] = useState(null)
+  // Voice is opt-in: tapping the avatar opens this confirm popup; a second tap
+  // (while live) ends the session. There is no separate voice button anymore.
+  const [voicePrompt, setVoicePrompt] = useState(false)
+  // The transcript is a scrollable log that stays pinned to the newest line
+  // unless the user has deliberately scrolled up to read history.
+  const scrollRef = useRef(null)
+  const stick = useRef(true)
+  // useSpeech now only powers offline dictation (speech-to-text). Spoken replies
+  // (TTS) were removed — for a voice conversation the customer uses live voice.
   const speech = useSpeech(lang)
-  const speechRef = useRef(speech)
-  speechRef.current = speech
 
   // Realtime voice session (Gemini Live via ADK). Transcripts land in the
   // same message list; leads flash the RM console tab like text chat does.
@@ -52,17 +59,31 @@ export default function Chat({ customer, householdMode, lang, voiceOn, sugam, on
     },
   })
 
-  const toggleLive = () => {
+  // Tapping the avatar: if a voice session is live, end it; otherwise ask
+  // first (the confirm popup), so the mic is never opened without consent.
+  const onAvatarTap = () => {
     if (voice.live) voice.stop()
-    else voice.start(customer.id, householdMode)
+    else setVoicePrompt(true)
+  }
+  const startVoice = () => {
+    setVoicePrompt(false)
+    voice.start(customer.id, householdMode)
   }
 
   useEffect(() => {
     setMessages([{ role: 'assistant', content: (GREET[lang] || GREET.en)(customer.name.split(' ')[0]) }])
   }, [customer.id, householdMode, lang]) // eslint-disable-line
 
-  // The transcript is bottom-anchored and masks itself as it rises, so no
-  // manual scrolling is needed — the newest line always sits at the bottom.
+  // Keep the transcript pinned to the newest line as it grows — but only while
+  // the user is already at the bottom, so scrolling up to read history sticks.
+  const onScroll = () => {
+    const el = scrollRef.current
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+  }
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el && stick.current) el.scrollTop = el.scrollHeight
+  }, [messages, busy, statusText])
 
   const send = async (text) => {
     const msg = (text ?? input).trim()
@@ -86,7 +107,7 @@ export default function Chat({ customer, householdMode, lang, voiceOn, sugam, on
       })
     try {
       const res = await api.chatStream(
-        { customer_id: customer.id, message: msg, history, household_mode: householdMode, sugam_mode: !!sugam },
+        { customer_id: customer.id, message: msg, history, household_mode: householdMode },
         (ev) => {
           if (ev.type === 'status') setStatusText(TOOL_STATUS[ev.tool] || 'Working on it…')
           if (ev.type === 'token') upsertStream((b) => ({ ...b, content: b.content + ev.text }))
@@ -97,7 +118,6 @@ export default function Chat({ customer, householdMode, lang, voiceOn, sugam, on
         return [...rest, { role: 'assistant', content: res.reply, lead: res.lead, events: res.events }]
       })
       if (res.lead) onLead?.(res.lead)
-      if (voiceOn) speechRef.current.speak(res.reply)
     } catch (e) {
       setMessages((m) => [...m, { role: 'assistant', content: `⚠️ ${e.message}` }])
     } finally {
@@ -107,7 +127,7 @@ export default function Chat({ customer, householdMode, lang, voiceOn, sugam, on
   }
 
   const avatarState =
-    voice.speaking || speech.speaking ? 'speaking'
+    voice.speaking ? 'speaking'
     : voice.thinking || busy ? 'thinking'
     : voice.live || speech.listening ? 'listening'
     : 'idle'
@@ -123,28 +143,35 @@ export default function Chat({ customer, householdMode, lang, voiceOn, sugam, on
 
   return (
     <div className={`stage ${householdMode ? 'household' : ''}`}>
-      {/* Full-screen 3D advisor — the figure you talk to. Transparent canvas so
-          the transcript floats over the very same stage background. */}
-      <div className="stage-scene">
-        <Avatar3D state={avatarState} levelRef={voice.live ? voice.levelRef : speech.levelRef} />
+      {/* Full-screen 3D advisor — the figure you talk to. Tap her to start (or
+          end) a live voice conversation. Transparent canvas so the transcript
+          floats over the very same stage background. */}
+      <div
+        className={`stage-scene ${voice.live ? 'live' : ''}`}
+        role="button"
+        tabIndex={0}
+        aria-label={voice.live ? 'End voice conversation with Saarthi' : 'Tap Saarthi to start a voice conversation'}
+        onClick={onAvatarTap}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onAvatarTap())}
+      >
+        <Avatar3D state={avatarState} levelRef={voice.levelRef} />
       </div>
       <AvatarLoading />
 
       <div className="stage-top">
         <div className={`stage-status ${avatarState}`} role="status">{statusLine}</div>
-        <div className="stage-top-actions">
-          {speech.speaking && (
-            <button className="chip stop-chip" onClick={speech.stopSpeaking}>◼ Stop voice</button>
-          )}
-          <button className={`chip live-chip ${voice.live ? 'on' : ''}`} onClick={toggleLive}>
-            {voice.live ? '◼ End live' : '🎙 Live voice'}
-          </button>
-        </div>
       </div>
 
-      {/* Floating transcript: newest at the bottom, rising and fading to nothing
-          as the conversation moves on. No bubbles — just words on the stage. */}
-      <div className="transcript" role="log" aria-live="polite" aria-label="Conversation with Saarthi">
+      {/* Affordance so it's discoverable that the avatar itself is the mic. */}
+      <button className={`voice-hint ${voice.live ? 'live' : ''}`} onClick={onAvatarTap}>
+        {voice.live ? '● Live · tap to end' : '🎙 Tap Saarthi to talk'}
+      </button>
+
+      {/* Floating transcript: newest at the bottom, older lines rising and fading
+          into the backdrop. Scrollable — drag up to revisit history; it re-pins
+          to the newest line once you're back at the bottom. No bubbles. */}
+      <div className={`transcript scale-${textScale}`} role="log" aria-live="polite" aria-label="Conversation with Saarthi"
+        ref={scrollRef} onScroll={onScroll}>
         <div className="transcript-inner">
           {messages.map((m, i) => (
             <div key={i} className={`floater ${m.role}`}>
@@ -205,6 +232,21 @@ export default function Chat({ customer, householdMode, lang, voiceOn, sugam, on
           <button className="send" onClick={() => send()} disabled={busy || !input.trim()} aria-label="Send message">➤</button>
         </div>
       </div>
+
+      {voicePrompt && (
+        <div className="modal-overlay" onClick={() => setVoicePrompt(false)}>
+          <div className="modal voice-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="voice-modal-orb" aria-hidden="true">🎙</div>
+            <div className="modal-title">Talk to Saarthi</div>
+            <p className="modal-sub">
+              Start a live voice conversation? Saarthi will use your microphone and reply out loud —
+              just start speaking. Tap her again any time to end the call.
+            </p>
+            <button className="consent-btn" onClick={startVoice}>Start voice conversation</button>
+            <button className="modal-close" onClick={() => setVoicePrompt(false)}>Not now</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
